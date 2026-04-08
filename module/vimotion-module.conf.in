@@ -1,0 +1,7 @@
+[Addon]
+Name=vimotion-module
+Category=Module
+Library=vimotion-module
+Type=SharedLibrary
+OnDemand=False
+Version=@PROJECT_VERSION@

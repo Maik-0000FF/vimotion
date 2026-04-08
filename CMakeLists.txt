@@ -15,6 +15,7 @@ find_package(Fcitx5Utils REQUIRED)
 include(GNUInstallDirs)
 
 add_subdirectory(addon)
+add_subdirectory(module)
 
 enable_testing()
 add_subdirectory(tests)
