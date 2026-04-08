@@ -1,7 +1,7 @@
 [InputMethod]
-Name=Vimotion
+Name=vimotion
 Icon=input-keyboard
-Label=Vi
+Label=vi
 LangCode=*
 Addon=vimotion
 Configurable=False

@@ -278,12 +278,203 @@ static void runTests(Instance *instance) {
     // Sollte jetzt im Insert Mode sein
     sendKey(frontend, uuid, FcitxKey_Escape);
 
-    // ====== Modifier durchlassen ======
-    std::cerr << "\n=== Modifier Pass-through ===\n";
+    // ====== cc Zeilenoperator ======
+    std::cerr << "\n=== cc Zeilenoperator ===\n";
+
+    TEST("cc -> Home, Shift+Down, Home, Shift+End, Delete (+ Insert Mode)");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_c), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_c), false);
+    EXPECT_FORWARDED_COUNT(5); // Home, Shift+Down, Home, Shift+End, Delete
+    sendKey(frontend, uuid, FcitxKey_Escape);
+
+    // ====== Operator + verschiedene Motions ======
+    std::cerr << "\n=== Operator + Motions ===\n";
+
+    TEST("dl -> Shift+Right, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_l), false);
+    EXPECT_FORWARDED_COUNT(2);
+
+    TEST("db -> Shift+Ctrl+Left, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_b), false);
+    EXPECT_FORWARDED_COUNT(2);
+
+    TEST("d$ -> Shift+End, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_dollar), false);
+    EXPECT_FORWARDED_COUNT(2);
+
+    TEST("d0 -> Shift+Home, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_0), false);
+    EXPECT_FORWARDED_COUNT(2);
+
+    TEST("yw -> Shift+Ctrl+Right, Ctrl+C, Right, Left");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_y), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_w), false);
+    EXPECT_FORWARDED_COUNT(4);
+
+    TEST("cb -> Shift+Ctrl+Left, Delete (+ Insert Mode)");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_c), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_b), false);
+    EXPECT_FORWARDED_COUNT(2);
+    sendKey(frontend, uuid, FcitxKey_Escape);
+
+    TEST("de -> Ctrl+Shift+Right, Shift+Left, Delete (e-Motion)");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_e), false);
+    EXPECT_FORWARDED_COUNT(3); // Ctrl+Shift+Right, Shift+Left, Delete
+
+    // ====== Count + Operatoren ======
+    std::cerr << "\n=== Count + Operatoren ===\n";
+
+    TEST("3dd -> Home, 3x Shift+Down, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_3), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    EXPECT_FORWARDED_COUNT(5); // Home, Shift+Down x3, Delete
+
+    TEST("2yy -> Home, 2x Shift+Down, Ctrl+C, Left");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_2), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_y), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_y), false);
+    EXPECT_FORWARDED_COUNT(5); // Home, Shift+Down x2, Ctrl+C, Left
+
+    TEST("d2w -> 2x Shift+Ctrl+Right, Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_2), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_w), false);
+    EXPECT_FORWARDED_COUNT(3); // Shift+Ctrl+Right x2, Delete
+
+    TEST("5x -> 5x Delete");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_5), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_x), false);
+    EXPECT_FORWARDED_COUNT(5);
+
+    // ====== Count: 0 als Fortsetzung vs Motion ======
+    std::cerr << "\n=== Count: 0 Verhalten ===\n";
+
+    TEST("10j -> 10x Down");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_1), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_0), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_j), false);
+    EXPECT_FORWARDED_COUNT(10);
+
+    TEST("0 alleine -> Home (Motion, kein Count)");
+    sendKey(frontend, uuid, FcitxKey_0);
+    EXPECT_FORWARDED(FcitxKey_Home);
+
+    // ====== Escape in Operator-Pending ======
+    std::cerr << "\n=== Operator-Pending Abbruch ===\n";
+
+    TEST("d + Escape -> abbrechen, kein Forward");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_d), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_Escape), false);
+    EXPECT_NO_FORWARD();
+
+    TEST("nach d+Escape: h funktioniert wieder (Normal Mode)");
+    sendKey(frontend, uuid, FcitxKey_h);
+    EXPECT_FORWARDED(FcitxKey_Left);
+
+    TEST("y + unbekannte Taste -> abbrechen, kein Forward");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_y), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_z), false);
+    EXPECT_NO_FORWARD();
+
+    // ====== g + nicht-g -> abbrechen ======
+    std::cerr << "\n=== g-Sequenz Abbruch ===\n";
+
+    TEST("g + x -> abbrechen, kein Forward");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_g), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_x), false);
+    EXPECT_NO_FORWARD();
+
+    TEST("nach g+x: h funktioniert (Normal Mode)");
+    sendKey(frontend, uuid, FcitxKey_h);
+    EXPECT_FORWARDED(FcitxKey_Left);
+
+    // ====== Tasten-Durchlass im Normal Mode ======
+    std::cerr << "\n=== Pass-through ===\n";
 
     TEST("Ctrl+S wird durchgelassen (kein Forward)");
     sendKey(frontend, uuid, FcitxKey_s, KeyState::Ctrl);
     EXPECT_NO_FORWARD();
+
+    TEST("Pfeiltaste Left wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_Left);
+    EXPECT_NO_FORWARD();
+
+    TEST("Pfeiltaste Down wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_Down);
+    EXPECT_NO_FORWARD();
+
+    TEST("F1 wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_F1);
+    EXPECT_NO_FORWARD();
+
+    TEST("Return wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_Return);
+    EXPECT_NO_FORWARD();
+
+    TEST("BackSpace wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_BackSpace);
+    EXPECT_NO_FORWARD();
+
+    TEST("Tab wird durchgelassen");
+    sendKey(frontend, uuid, FcitxKey_Tab);
+    EXPECT_NO_FORWARD();
+
+    TEST("Druckbares Zeichen 'q' wird konsumiert");
+    sendKey(frontend, uuid, FcitxKey_q);
+    EXPECT_NO_FORWARD();
+
+    // ====== Mehrfacher Moduswechsel ======
+    std::cerr << "\n=== Moduswechsel ===\n";
+
+    TEST("Normal -> i -> Escape -> a -> Escape -> j (mehrfach wechseln)");
+    sendKey(frontend, uuid, FcitxKey_i); // Insert
+    sendKey(frontend, uuid, FcitxKey_Escape); // Normal
+    sendKey(frontend, uuid, FcitxKey_a); // Insert (forwards Right)
+    sendKey(frontend, uuid, FcitxKey_Escape); // Normal
+    sendKey(frontend, uuid, FcitxKey_j); // Should forward Down
+    EXPECT_FORWARDED(FcitxKey_Down);
+
+    TEST("c + Motion -> Insert -> Escape -> Normal (Operator wechselt Modus)");
+    forwarded.clear();
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_c), false);
+    frontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_l), false);
+    // Jetzt im Insert Mode
+    sendKey(frontend, uuid, FcitxKey_Escape); // Normal
+    sendKey(frontend, uuid, FcitxKey_k); // Should forward Up
+    EXPECT_FORWARDED(FcitxKey_Up);
+
+    // ====== p/P Paste ======
+    std::cerr << "\n=== Paste ===\n";
+
+    TEST("p -> End, Return, Ctrl+V");
+    sendKey(frontend, uuid, FcitxKey_p);
+    EXPECT_FORWARDED_COUNT(3);
+
+    TEST("P -> Home, Return, Up, Ctrl+V");
+    sendKey(frontend, uuid, FcitxKey_P);
+    EXPECT_FORWARDED_COUNT(4);
 
     // ====== Zusammenfassung ======
     std::cerr << "\n=============================\n";

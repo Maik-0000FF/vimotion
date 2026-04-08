@@ -1,9 +1,9 @@
-# Vimotion
+# vimotion
 
 > **Warning**
 > This project is experimental and in an early stage of development. Expect bugs, incomplete features, and breaking changes.
 
-Vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) input method addon that brings Vim-like modal editing to any application — system-wide. It works by intercepting key events through the input method layer and translating Vim commands into standard system shortcuts.
+vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) input method addon that brings Vim-like modal editing to any application — system-wide. It works by intercepting key events through the input method layer and translating Vim commands into standard system shortcuts.
 
 ## Features (v0.1)
 
@@ -43,8 +43,8 @@ sudo cmake --install .
 
 1. Log out and back in (for environment variables)
 2. Open `fcitx5-configtool`
-3. Go to **Input Method** → click **+** → search **Vimotion** → add it
-4. Switch to Vimotion with your trigger key (default: `Ctrl+Space`)
+3. Go to **Input Method** → click **+** → search **vimotion** → add it
+4. Switch to vimotion with your trigger key (default: `Ctrl+Space`)
 5. You start in **Normal Mode** `[N]` — press `i` for Insert Mode `[I]`, `Escape` to return
 
 ### Uninstall

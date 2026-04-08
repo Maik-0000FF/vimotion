@@ -206,13 +206,19 @@ void VimotionEngine::handleNormalMode(fcitx::KeyEvent &event) {
         return;
     }
     if (key.check(FcitxKey_p)) {
-        ic->forwardKey(fcitx::Key(FcitxKey_Right));
+        // Zeile darunter einfuegen: End -> Enter -> Paste
+        ic->forwardKey(fcitx::Key(FcitxKey_End));
+        ic->forwardKey(fcitx::Key(FcitxKey_Return));
         ic->forwardKey(pasteKey(ic));
         resetState();
         event.filterAndAccept();
         return;
     }
     if (key.check(FcitxKey_P)) {
+        // Zeile darueber einfuegen: Home -> Enter -> Up -> Paste
+        ic->forwardKey(fcitx::Key(FcitxKey_Home));
+        ic->forwardKey(fcitx::Key(FcitxKey_Return));
+        ic->forwardKey(fcitx::Key(FcitxKey_Up));
         ic->forwardKey(pasteKey(ic));
         resetState();
         event.filterAndAccept();
@@ -255,8 +261,11 @@ void VimotionEngine::handleNormalMode(fcitx::KeyEvent &event) {
         return;
     }
 
-    // Alle anderen unmodifizierten Tasten konsumieren (Vim Normal-Verhalten)
-    event.filterAndAccept();
+    // Druckbare Zeichen konsumieren (Vim Normal: kein Tippen)
+    // Alles andere (F-Tasten, Pfeiltasten, Backspace, Enter, Tab, ...) durchlassen
+    if (key.sym() >= 0x20 && key.sym() <= 0x7E) {
+        event.filterAndAccept();
+    }
 }
 
 void VimotionEngine::handleOperatorPending(fcitx::KeyEvent &event) {
@@ -439,7 +448,8 @@ void VimotionEngine::executeLineOperator(fcitx::InputContext *ic, Operator op,
         break;
     case Operator::Yank:
         ic->forwardKey(copyKey(ic));
-        ic->forwardKey(fcitx::Key(FcitxKey_End));
+        // Left kollabiert die Selektion zum Anfang (= original Zeilenstart)
+        ic->forwardKey(fcitx::Key(FcitxKey_Left));
         break;
     case Operator::Change:
         // cc: Home -> Shift+End -> Delete -> Insert
@@ -501,7 +511,7 @@ void VimotionEngine::updateModeDisplay(fcitx::InputContext *ic) {
 bool VimotionEngine::isTerminal(fcitx::InputContext *ic) const {
     const auto &program = ic->program();
     static const std::vector<std::string> terminals = {
-        "wezterm", "kitty", "alacritty", "xterm",
+        "wezterm", "kitty", "alacritty", "ghostty", "xterm",
         "gnome-terminal", "konsole", "foot", "st",
         "urxvt", "termite", "tilix", "sakura"
     };

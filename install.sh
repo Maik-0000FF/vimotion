@@ -9,7 +9,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  Vimotion - Installation${NC}"
+echo -e "${BLUE}  vimotion - Installation${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo
 
@@ -389,10 +389,10 @@ echo
 echo "3. In the configuration window:"
 echo "   - Go to 'Input Method' tab"
 echo "   - Click '+' to add"
-echo "   - Search for 'Vimotion'"
+echo "   - Search for 'vimotion'"
 echo "   - Add it to your input methods"
 echo
-echo "4. Switch to Vimotion using your trigger key (default: Ctrl+Space)"
+echo "4. Switch to vimotion using your trigger key (default: Ctrl+Space)"
 echo
 echo "5. You start in Normal Mode [N]:"
 echo "   - h/j/k/l to move cursor"
