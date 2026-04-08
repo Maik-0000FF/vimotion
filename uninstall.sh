@@ -1,0 +1,218 @@
+#!/bin/bash
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  Vimotion - Uninstallation${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo
+
+# --- Distribution Detection ---
+
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            arch|manjaro|endeavouros|garuda|artix|cachyos)
+                echo "arch" ;;
+            debian|ubuntu|linuxmint|pop|kali|elementary|zorin|mx|neon)
+                echo "debian" ;;
+            fedora|nobara)
+                echo "fedora" ;;
+            opensuse*|suse)
+                echo "suse" ;;
+            *)
+                case "${ID_LIKE:-}" in
+                    *arch*)                 echo "arch" ;;
+                    *debian*|*ubuntu*)      echo "debian" ;;
+                    *fedora*)               echo "fedora" ;;
+                    *suse*)                 echo "suse" ;;
+                    *)                      echo "unknown" ;;
+                esac ;;
+        esac
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "arch"
+    elif command -v apt >/dev/null 2>&1; then
+        echo "debian"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "fedora"
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "suse"
+    else
+        echo "unknown"
+    fi
+}
+
+DISTRO=$(detect_distro)
+
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO_NAME="${PRETTY_NAME:-$ID}"
+else
+    DISTRO_NAME="Unknown"
+fi
+
+echo -e "${BLUE}Distribution:${NC} $DISTRO_NAME"
+echo
+
+# Check if running with sudo (should NOT be)
+if [ "$EUID" -eq 0 ]; then
+    echo -e "${RED}Error: Do not run this script with sudo!${NC}"
+    echo "Run as regular user. Sudo will be requested when needed."
+    exit 1
+fi
+
+# --- Find Installed Files ---
+
+# Check all possible library paths
+LIB_PATHS=(
+    /usr/lib/fcitx5
+    /usr/lib64/fcitx5
+    /usr/local/lib/fcitx5
+    /usr/local/lib64/fcitx5
+)
+
+# Debian uses multiarch lib paths
+if [ "$DISTRO" = "debian" ] || [ "$DISTRO" = "unknown" ]; then
+    LIB_PATHS+=(
+        /usr/lib/x86_64-linux-gnu/fcitx5
+        /usr/lib/aarch64-linux-gnu/fcitx5
+        /usr/local/lib/x86_64-linux-gnu/fcitx5
+        /usr/local/lib/aarch64-linux-gnu/fcitx5
+    )
+fi
+
+FOUND_FILES=()
+
+for lib_path in "${LIB_PATHS[@]}"; do
+    [ -f "$lib_path/vimotion.so" ] && \
+        FOUND_FILES+=("$lib_path/vimotion.so")
+done
+
+DATA_FILES=(
+    /usr/share/fcitx5/addon/vimotion.conf
+    /usr/share/fcitx5/inputmethod/vimotion-im.conf
+    /usr/local/share/fcitx5/addon/vimotion.conf
+    /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
+)
+
+for file in "${DATA_FILES[@]}"; do
+    [ -f "$file" ] && FOUND_FILES+=("$file")
+done
+
+if [ ${#FOUND_FILES[@]} -eq 0 ]; then
+    echo -e "${YELLOW}No installation found. Nothing to uninstall.${NC}"
+    exit 0
+fi
+
+echo -e "${YELLOW}Found installed files:${NC}"
+for file in "${FOUND_FILES[@]}"; do
+    echo "  - $file"
+done
+echo
+
+read -p "Remove these files? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${YELLOW}Uninstallation cancelled.${NC}"
+    exit 0
+fi
+
+# --- Remove Files ---
+
+echo -e "${BLUE}Removing files (requires sudo)...${NC}"
+sudo rm -f "${FOUND_FILES[@]}"
+for file in "${FOUND_FILES[@]}"; do
+    echo -e "  ${GREEN}✓${NC} Removed: $file"
+done
+echo
+
+# --- Environment Variables ---
+
+ENV_FILE="$HOME/.config/environment.d/fcitx5.conf"
+if [ -f "$ENV_FILE" ]; then
+    echo -e "${YELLOW}Environment configuration found: $ENV_FILE${NC}"
+    read -p "Remove environment configuration? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -f "$ENV_FILE"
+        echo -e "${GREEN}✓ Environment configuration removed${NC}"
+        echo -e "${YELLOW}Note: Logout/login to apply changes${NC}"
+    else
+        echo -e "${YELLOW}Keeping environment configuration${NC}"
+    fi
+    echo
+fi
+
+# --- Autostart ---
+
+AUTOSTART_FILES=(
+    "$HOME/.config/autostart/org.fcitx.Fcitx5.desktop"
+    "$HOME/.config/autostart/fcitx5.desktop"
+)
+
+for autostart in "${AUTOSTART_FILES[@]}"; do
+    if [ -f "$autostart" ]; then
+        echo -e "${YELLOW}Autostart configuration found: $autostart${NC}"
+        read -p "Remove autostart configuration? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -f "$autostart"
+            echo -e "${GREEN}✓ Autostart configuration removed${NC}"
+        else
+            echo -e "${YELLOW}Keeping autostart configuration${NC}"
+        fi
+        echo
+        break
+    fi
+done
+
+# --- Restart Fcitx5 ---
+
+echo -e "${BLUE}Restarting Fcitx5...${NC}"
+if pgrep -x fcitx5 > /dev/null; then
+    if [ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
+        fcitx5-remote -r 2>/dev/null && \
+            echo -e "${GREEN}✓ Fcitx5 config reloaded${NC}" || \
+            echo -e "${YELLOW}Could not reload fcitx5 config${NC}"
+        echo -e "${YELLOW}  Logout/login to fully apply changes${NC}"
+    else
+        killall fcitx5 2>/dev/null || pkill fcitx5 2>/dev/null || true
+        sleep 1
+        fcitx5 -d 2>/dev/null &
+        sleep 2
+        if pgrep -x fcitx5 > /dev/null; then
+            echo -e "${GREEN}✓ Fcitx5 restarted successfully${NC}"
+        else
+            echo -e "${YELLOW}Fcitx5 stopped (will start on next login)${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}Fcitx5 not running${NC}"
+fi
+echo
+
+# --- Done ---
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  Uninstallation Complete!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo
+echo -e "${YELLOW}Notes:${NC}"
+case "$DISTRO" in
+    arch)   echo "  - Fcitx5 packages are still installed (remove with: sudo pacman -R fcitx5)" ;;
+    debian) echo "  - Fcitx5 packages are still installed (remove with: sudo apt remove fcitx5)" ;;
+    fedora) echo "  - Fcitx5 packages are still installed (remove with: sudo dnf remove fcitx5)" ;;
+    suse)   echo "  - Fcitx5 packages are still installed (remove with: sudo zypper remove fcitx5)" ;;
+esac
+echo "  - Logout/login to fully apply changes"
+if [ -f "$ENV_FILE" ]; then
+    echo "  - Environment config kept at: $ENV_FILE"
+fi
+echo

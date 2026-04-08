@@ -464,13 +464,16 @@ void VimotionEngine::updateModeDisplay(fcitx::InputContext *ic) {
 
     fcitx::Text aux;
     switch (mode_) {
-    case Mode::Normal:
+    case Mode::Normal: {
+        std::string display = "[N]";
         if (countActive_) {
-            aux.append(std::to_string(count_));
+            display += " " + std::to_string(count_);
         }
+        aux.append(display);
         break;
+    }
     case Mode::OperatorPending: {
-        std::string display;
+        std::string display = "[N] ";
         if (countActive_) {
             display += std::to_string(count_);
         }
@@ -487,6 +490,7 @@ void VimotionEngine::updateModeDisplay(fcitx::InputContext *ic) {
         break;
     }
     case Mode::Insert:
+        aux.append("[I]");
         break;
     }
 
