@@ -1,0 +1,7 @@
+[Addon]
+Name=Vimotion
+Category=InputMethod
+Library=vimotion
+Type=SharedLibrary
+OnDemand=True
+Version=@PROJECT_VERSION@
