@@ -46,7 +46,7 @@ trap 'on_error ${LINENO}' ERR
 require_cmd() {
     local cmd
     for cmd in "$@"; do
-        /usr/bin/command -v "${cmd}" >/dev/null 2>&1 \
+        command -v "${cmd}" >/dev/null 2>&1 \
             || die "Required command not found: ${cmd}"
     done
 }
@@ -93,10 +93,10 @@ detect_distro() {
                     *) echo unknown ;;
                 esac ;;
         esac
-    elif /usr/bin/command -v pacman >/dev/null 2>&1; then echo arch
-    elif /usr/bin/command -v apt    >/dev/null 2>&1; then echo debian
-    elif /usr/bin/command -v dnf    >/dev/null 2>&1; then echo fedora
-    elif /usr/bin/command -v zypper >/dev/null 2>&1; then echo suse
+    elif command -v pacman >/dev/null 2>&1; then echo arch
+    elif command -v apt    >/dev/null 2>&1; then echo debian
+    elif command -v dnf    >/dev/null 2>&1; then echo fedora
+    elif command -v zypper >/dev/null 2>&1; then echo suse
     else echo unknown
     fi
 }
@@ -206,9 +206,9 @@ log
 # Verify required tools after dependency install
 #-----------------------------------------------------------------------
 require_cmd /usr/bin/cmake
-if /usr/bin/command -v /usr/bin/c++ >/dev/null 2>&1; then
+if command -v /usr/bin/c++ >/dev/null 2>&1; then
     : # OK
-elif /usr/bin/command -v /usr/bin/g++ >/dev/null 2>&1; then
+elif command -v /usr/bin/g++ >/dev/null 2>&1; then
     : # OK
 else
     die "No C++ compiler (c++/g++) found in /usr/bin."
@@ -358,7 +358,7 @@ log
 #-----------------------------------------------------------------------
 if [[ "${DISTRO}" == "debian" ]]; then
     info "Configuring input method framework..."
-    if ! /usr/bin/command -v im-config >/dev/null 2>&1; then
+    if ! command -v im-config >/dev/null 2>&1; then
         warn "Installing im-config..."
         sudo /usr/bin/apt-get install -y im-config
     fi
@@ -408,7 +408,7 @@ log
 info "Reloading Fcitx5..."
 if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
-        if /usr/bin/command -v fcitx5-remote >/dev/null 2>&1; then
+        if command -v fcitx5-remote >/dev/null 2>&1; then
             fcitx5-remote -r >/dev/null 2>&1 && \
                 ok "✓ Fcitx5 config reloaded" || \
                 warn "fcitx5-remote -r failed"

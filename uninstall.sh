@@ -42,7 +42,7 @@ if [[ ${EUID} -eq 0 ]]; then
     die "Do not run this script as root. Sudo will be requested when needed."
 fi
 
-if ! /usr/bin/command -v sudo >/dev/null 2>&1; then
+if ! command -v sudo >/dev/null 2>&1; then
     die "sudo not found — required to remove system files."
 fi
 
@@ -213,7 +213,7 @@ DESKTOP="${XDG_CURRENT_DESKTOP:-}"
 info "Reloading Fcitx5..."
 if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
-        if /usr/bin/command -v fcitx5-remote >/dev/null 2>&1; then
+        if command -v fcitx5-remote >/dev/null 2>&1; then
             fcitx5-remote -r >/dev/null 2>&1 && \
                 ok "✓ Fcitx5 config reloaded" || \
                 warn "fcitx5-remote -r failed"
