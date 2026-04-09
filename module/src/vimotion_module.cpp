@@ -1,5 +1,8 @@
 #include "vimotion_module.h"
 #include "motions.h"
+#include <algorithm>
+#include <cstdint>
+#include <fcitx-utils/eventloopinterface.h>
 #include <fcitx-utils/keysymgen.h>
 #include <fcitx-utils/textformatflags.h>
 #include <fcitx/addonmanager.h>
@@ -7,22 +10,124 @@
 #include <fcitx/text.h>
 #include <fcitx/userinterface.h>
 
-// Motions aus der gemeinsamen Tabelle (addon/src/motions.cpp)
-using vimotion::getMotionMappings;
-
 namespace vimotion_module {
+
+namespace {
+
+constexpr const char *kConfigFile = "conf/vimotion-module.conf";
+
+// Trim leading/trailing whitespace
+std::string trim(const std::string &s) {
+    size_t a = 0;
+    while (a < s.size() &&
+           (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n')) {
+        ++a;
+    }
+    size_t b = s.size();
+    while (b > a &&
+           (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' ||
+            s[b - 1] == '\n')) {
+        --b;
+    }
+    return s.substr(a, b - a);
+}
+
+} // namespace
 
 VimotionModule::VimotionModule(fcitx::Instance *instance)
     : instance_(instance) {
-    // Per-IC State registrieren
     instance_->inputContextManager().registerProperty("vimotion-state",
                                                       &factory_);
 
-    // Key-Handler in PreInputMethod Phase registrieren
+    loadConfigFromFile();
+
     keyHandler_ = instance_->watchEvent(
         fcitx::EventType::InputContextKeyEvent,
         fcitx::EventWatcherPhase::PreInputMethod,
         [this](fcitx::Event &event) { handleKeyEvent(event); });
+
+    // Auto-enable per InputContext when it gets focus
+    focusInHandler_ = instance_->watchEvent(
+        fcitx::EventType::InputContextFocusIn,
+        fcitx::EventWatcherPhase::PostInputMethod,
+        [this](fcitx::Event &event) {
+            auto &icEvent = static_cast<fcitx::InputContextEvent &>(event);
+            auto *ic = icEvent.inputContext();
+            auto *state = ic->propertyFor(&factory_);
+            if (enabledByDefault_ && !state->enabled && !isFiltered(ic)) {
+                state->enabled = true;
+                state->mode = Mode::Normal;
+                resetState(state);
+                updateModeDisplay(state, ic);
+            }
+        });
+
+    // Clear pending sequence buffer when focus leaves the IC so a stale
+    // timer cannot reach a destroyed input context.
+    focusOutHandler_ = instance_->watchEvent(
+        fcitx::EventType::InputContextFocusOut,
+        fcitx::EventWatcherPhase::PostInputMethod,
+        [this](fcitx::Event &event) {
+            auto &icEvent = static_cast<fcitx::InputContextEvent &>(event);
+            auto *state = icEvent.inputContext()->propertyFor(&factory_);
+            clearSeqBuffer(state);
+        });
+}
+
+void VimotionModule::loadConfigFromFile() {
+    fcitx::readAsIni(config_, kConfigFile);
+    applyConfig();
+}
+
+void VimotionModule::setConfig(const fcitx::RawConfig &rawConfig) {
+    config_.load(rawConfig);
+    fcitx::safeSaveAsIni(config_, kConfigFile);
+    applyConfig();
+}
+
+void VimotionModule::reloadConfig() {
+    loadConfigFromFile();
+}
+
+void VimotionModule::applyConfig() {
+    enabledByDefault_ = *config_.general->enabledByDefault;
+    toggleKeys_ = *config_.general->toggleKey;
+    filterMode_ = *config_.appFilter->mode;
+    blacklist_ = *config_.appFilter->blacklist;
+    whitelist_ = *config_.appFilter->whitelist;
+    seqTimeoutMs_ = *config_.mappings->timeoutMs;
+    parseInsertMappings();
+}
+
+void VimotionModule::parseInsertMappings() {
+    insertMappings_.clear();
+    for (const auto &line : *config_.mappings->insertMap) {
+        auto trimmed = trim(line);
+        if (trimmed.empty() || trimmed[0] == '#') continue;
+        auto eq = trimmed.find('=');
+        if (eq == std::string::npos || eq == 0 || eq + 1 >= trimmed.size()) {
+            continue;
+        }
+        std::string from = trim(trimmed.substr(0, eq));
+        std::string to = trim(trimmed.substr(eq + 1));
+        if (from.empty() || to.empty()) continue;
+
+        // Reject sequences that contain non-printable characters; they cannot
+        // be matched by typed input anyway.
+        bool ok = true;
+        for (char c : from) {
+            if (static_cast<unsigned char>(c) < 0x20 ||
+                static_cast<unsigned char>(c) > 0x7E) {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) continue;
+
+        fcitx::Key target(to);
+        if (target.sym() == FcitxKey_None) continue;
+        insertMappings_.push_back({std::move(from), target});
+    }
 }
 
 void VimotionModule::handleKeyEvent(fcitx::Event &event) {
@@ -35,16 +140,19 @@ void VimotionModule::handleKeyEvent(fcitx::Event &event) {
     auto *ic = keyEvent.inputContext();
     auto *state = ic->propertyFor(&factory_);
 
-    // Blacklist pruefen
-    if (isBlacklisted(ic)) {
+    // App-Filter (Black-/Whitelist)
+    if (isFiltered(ic)) {
         return;
     }
 
-    // Toggle-Hotkey: Ctrl+Escape
-    if (keyEvent.key().check(toggleKey_)) {
+    // Toggle-Hotkey
+    if (keyEvent.key().checkKeyList(toggleKeys_)) {
         state->enabled = !state->enabled;
         if (state->enabled) {
             state->mode = Mode::Normal;
+            resetState(state);
+        } else {
+            clearSeqBuffer(state);
             resetState(state);
         }
         updateModeDisplay(state, ic);
@@ -70,14 +178,123 @@ void VimotionModule::handleKeyEvent(fcitx::Event &event) {
     }
 }
 
+bool VimotionModule::isPrintableAscii(fcitx::KeySym sym) const {
+    return sym >= 0x20 && sym <= 0x7E;
+}
+
+void VimotionModule::clearSeqBuffer(VimState *state) {
+    state->seqText.clear();
+    state->seqKeys.clear();
+    state->seqTimer.reset();
+}
+
+void VimotionModule::flushSeqBuffer(VimState *state, fcitx::InputContext *ic) {
+    auto keys = std::move(state->seqKeys);
+    state->seqText.clear();
+    state->seqTimer.reset();
+    for (const auto &k : keys) {
+        ic->forwardKey(k);
+    }
+}
+
+void VimotionModule::scheduleSeqTimeout(VimState *state,
+                                        fcitx::InputContext *ic) {
+    auto &loop = instance_->eventLoop();
+    uint64_t now = fcitx::now(CLOCK_MONOTONIC);
+    state->seqTimer = loop.addTimeEvent(
+        CLOCK_MONOTONIC,
+        now + static_cast<uint64_t>(seqTimeoutMs_) * 1000ULL,
+        0,
+        [this, state, ic](fcitx::EventSourceTime *, uint64_t) {
+            if (!state->seqText.empty()) {
+                flushSeqBuffer(state, ic);
+            }
+            return true;
+        });
+}
+
 void VimotionModule::handleInsertMode(VimState *state,
                                       fcitx::KeyEvent &event) {
+    auto *ic = event.inputContext();
+
+    // Escape always returns to Normal mode (and flushes any pending seq).
     if (event.key().check(FcitxKey_Escape)) {
-        switchMode(state, Mode::Normal, event.inputContext());
+        if (!state->seqText.empty()) {
+            // Forward buffered keys before mode change so the user does not
+            // lose what they typed.
+            flushSeqBuffer(state, ic);
+        }
+        switchMode(state, Mode::Normal, ic);
         event.filterAndAccept();
         return;
     }
-    // Alle anderen Tasten durchlassen (-> an schnelle-umlaute / IM)
+
+    // Modified keys (Ctrl/Alt/Super) bypass the sequence buffer entirely.
+    if (event.key().states() &
+        fcitx::KeyStates({fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
+                          fcitx::KeyState::Super})) {
+        if (!state->seqText.empty()) {
+            flushSeqBuffer(state, ic);
+        }
+        return;
+    }
+
+    // Only printable ASCII keys feed into the sequence matcher.
+    if (!isPrintableAscii(event.key().sym())) {
+        if (!state->seqText.empty()) {
+            flushSeqBuffer(state, ic);
+        }
+        return;
+    }
+
+    if (insertMappings_.empty()) {
+        return; // Nothing to match against.
+    }
+
+    char ch = static_cast<char>(event.key().sym());
+    std::string candidate = state->seqText + ch;
+
+    // Look for an exact match first.
+    for (const auto &m : insertMappings_) {
+        if (m.from == candidate) {
+            clearSeqBuffer(state);
+            // Mapping the sequence to Escape mirrors the user pressing Escape
+            // directly: switch back to Normal mode instead of forwarding
+            // Escape to the underlying application.
+            if (m.target.check(FcitxKey_Escape)) {
+                switchMode(state, Mode::Normal, ic);
+            } else {
+                ic->forwardKey(m.target);
+            }
+            event.filterAndAccept();
+            return;
+        }
+    }
+
+    // Look for a prefix match (potential longer sequence).
+    bool isPrefix = false;
+    for (const auto &m : insertMappings_) {
+        if (m.from.size() > candidate.size() &&
+            m.from.compare(0, candidate.size(), candidate) == 0) {
+            isPrefix = true;
+            break;
+        }
+    }
+
+    if (isPrefix) {
+        state->seqText = candidate;
+        state->seqKeys.push_back(event.key());
+        scheduleSeqTimeout(state, ic);
+        event.filterAndAccept();
+        return;
+    }
+
+    // No match and no prefix: flush whatever is buffered, then let the new
+    // key pass through unchanged.
+    if (!state->seqText.empty()) {
+        flushSeqBuffer(state, ic);
+    }
+    // Let key pass through to the underlying IM / application.
 }
 
 void VimotionModule::handleNormalMode(VimState *state,
@@ -121,14 +338,12 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // g-Taste: Pending setzen
     if (key.check(FcitxKey_g)) {
         state->pendingG = true;
         event.filterAndAccept();
         return;
     }
 
-    // e-Motion: Wortende (Ctrl+Right, Left)
     if (key.check(FcitxKey_e)) {
         executeMotionE(ic, effectiveCount, false);
         resetState(state);
@@ -136,7 +351,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Motion-Lookup ueber Mapping-Tabelle
     for (const auto &m : getMotionMappings()) {
         if (key.check(m.vimKey)) {
             if (m.vimKey == FcitxKey_0 && state->countActive) {
@@ -151,7 +365,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         }
     }
 
-    // Count-Prefix: Ziffern 1-9 starten, 0 setzt fort
     if (key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
         int digit = key.sym() - FcitxKey_0;
         if (state->countActive) {
@@ -165,7 +378,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Insert-Mode Einstiege
     if (key.check(FcitxKey_i)) {
         switchMode(state, Mode::Insert, ic);
         resetState(state);
@@ -211,7 +423,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Einfache Befehle
     if (key.check(FcitxKey_x)) {
         for (int i = 0; i < effectiveCount; ++i) {
             ic->forwardKey(fcitx::Key(FcitxKey_Delete));
@@ -254,7 +465,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Operatoren -> Operator-Pending
     if (key.check(FcitxKey_d)) {
         state->pendingOp = Operator::Delete;
         switchMode(state, Mode::OperatorPending, ic);
@@ -274,7 +484,6 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Escape: State zuruecksetzen
     if (key.check(FcitxKey_Escape)) {
         resetState(state);
         updateModeDisplay(state, ic);
@@ -282,8 +491,7 @@ void VimotionModule::handleNormalMode(VimState *state,
         return;
     }
 
-    // Druckbare Zeichen konsumieren (kein Tippen im Normal Mode)
-    // Alles andere (F-Tasten, Pfeiltasten, Backspace, etc.) durchlassen
+    // Druckbare Zeichen konsumieren (kein Tippen im Normal Mode).
     if (key.sym() >= 0x20 && key.sym() <= 0x7E) {
         event.filterAndAccept();
     }
@@ -294,7 +502,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
     auto key = event.key();
     auto *ic = event.inputContext();
 
-    // Escape: zurueck zu Normal
     if (key.check(FcitxKey_Escape)) {
         switchMode(state, Mode::Normal, ic);
         resetState(state);
@@ -304,7 +511,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
 
     int effectiveCount = state->countActive ? state->count : 1;
 
-    // Count im Operator-Pending
     if (key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
         int digit = key.sym() - FcitxKey_0;
         if (state->countActive) {
@@ -318,7 +524,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
         return;
     }
 
-    // Gleicher Operator nochmal -> Zeilenoperator (dd/yy/cc)
     if ((state->pendingOp == Operator::Delete && key.check(FcitxKey_d)) ||
         (state->pendingOp == Operator::Yank && key.check(FcitxKey_y)) ||
         (state->pendingOp == Operator::Change && key.check(FcitxKey_c))) {
@@ -329,7 +534,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
         return;
     }
 
-    // Pending-g Sequenz: dgg, ygg, cgg
     if (state->pendingG) {
         state->pendingG = false;
         if (key.check(FcitxKey_g)) {
@@ -356,7 +560,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
         return;
     }
 
-    // e-Motion mit Operator
     if (key.check(FcitxKey_e)) {
         executeMotionE(ic, effectiveCount, true);
         switch (state->pendingOp) {
@@ -383,7 +586,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
         return;
     }
 
-    // Motion-Lookup: Operator + Motion ausfuehren
     for (const auto &m : getMotionMappings()) {
         if (key.check(m.vimKey)) {
             if (m.vimKey == FcitxKey_0 && state->countActive) {
@@ -402,7 +604,6 @@ void VimotionModule::handleOperatorPending(VimState *state,
         }
     }
 
-    // Unbekannte Taste: abbrechen
     switchMode(state, Mode::Normal, ic);
     resetState(state);
     event.filterAndAccept();
@@ -485,6 +686,10 @@ void VimotionModule::executeLineOperator(fcitx::InputContext *ic,
 void VimotionModule::switchMode(VimState *state, Mode newMode,
                                 fcitx::InputContext *ic) {
     state->mode = newMode;
+    if (newMode != Mode::Insert) {
+        // Sequence buffering only matters in Insert mode.
+        clearSeqBuffer(state);
+    }
     updateModeDisplay(state, ic);
 }
 
@@ -494,9 +699,7 @@ void VimotionModule::updateModeDisplay(VimState *state,
     inputPanel.reset();
 
     fcitx::Text aux;
-    if (!state->enabled) {
-        // Nichts anzeigen wenn deaktiviert
-    } else {
+    if (state->enabled) {
         switch (state->mode) {
         case Mode::Normal: {
             std::string display = "[N]";
@@ -540,14 +743,27 @@ void VimotionModule::resetState(VimState *state) {
     state->pendingG = false;
 }
 
-bool VimotionModule::isBlacklisted(fcitx::InputContext *ic) const {
-    const auto &program = ic->program();
-    for (const auto &app : blacklist_) {
-        if (program.find(app) != std::string::npos) {
-            return true;
+bool VimotionModule::isFiltered(fcitx::InputContext *ic) const {
+    if (filterMode_ == AppFilterMode::None) return false;
+
+    const std::string &program = ic->program();
+    if (program.empty()) return false;
+
+    if (filterMode_ == AppFilterMode::Blacklist) {
+        for (const auto &app : blacklist_) {
+            if (!app.empty() && program.find(app) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Whitelist: only active in listed apps
+    for (const auto &app : whitelist_) {
+        if (!app.empty() && program.find(app) != std::string::npos) {
+            return false;
         }
     }
-    return false;
+    return true;
 }
 
 bool VimotionModule::isTerminal(fcitx::InputContext *ic) const {

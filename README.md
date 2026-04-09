@@ -1,11 +1,11 @@
 # vimotion
 
 > **Warning**
-> This project is experimental and in an early stage of development. Expect bugs, incomplete features, and breaking changes.
+> Experimental and early-stage. Expect bugs, incomplete features, and breaking changes.
 
-vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) addon that brings Vim-like modal editing to any application — system-wide. It works by intercepting key events through the input method layer and translating Vim commands into standard system shortcuts.
+vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) module that brings Vim-like modal editing to any application — system-wide. It intercepts key events through fcitx5 and translates Vim commands into standard system shortcuts.
 
-## Features (v0.1)
+## Features
 
 - **Three modes**: Normal, Insert, Operator-Pending
 - **Motions**: `h` `j` `k` `l` `w` `b` `e` `0` `$` `gg` `G`
@@ -14,72 +14,93 @@ vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) addon that brings Vim-li
 - **Count prefix**: `3j`, `2dd`, `5x`, etc.
 - **Terminal detection**: automatic Ctrl+Shift+C/V for terminal emulators
 - **Mode indicator**: `[N]` Normal, `[I]` Insert
+- **Configurable** through `fcitx5-configtool` → Addons → vimotion:
+  - Auto-enable on focus
+  - Custom toggle hotkey
+  - App white/blacklist
+  - Insert-mode key sequence mappings (e.g. `jk` → `Escape`)
 
-## Two Variants
+## Architecture
 
-vimotion ships as two variants — both are built and installed:
+vimotion ships as a single Fcitx5 **module** (`vimotion-module.so`). The module runs in the `PreInputMethod` phase and can be toggled per input context, which means:
 
-| | Input Method | Module |
-|---|---|---|
-| **File** | `vimotion.so` | `vimotion-module.so` |
-| **Activate** | `Ctrl+Space` (switch IM) | `Ctrl+Escape` (toggle) |
-| **Runs alongside other IMs** | no | yes |
-| **App blacklist** | no | yes (nvim, vim) |
-| **Use when** | vimotion is your only IM | you use vimotion alongside another IM |
-
-### Module variant
-
-The module runs in the background and can be toggled independently of your active input method. This means you can use vimotion together with other Fcitx5 addons (e.g. for special characters or snippets). It automatically disables itself in blacklisted apps like neovim or vim. Each window has its own mode state.
-
-### Input Method variant
-
-A standalone input method that you switch to via the regular Fcitx5 trigger key. Use this if you don't need parallel operation with other input methods.
+- It runs alongside any other Fcitx5 input method (no need to switch IM).
+- Each window has its own mode state.
+- App filtering disables it inside vim/neovim/etc. by default.
 
 ## Installation
 
 ### Requirements
 
 - Fcitx5 and development libraries
-- CMake, C++20 compiler
+- CMake ≥ 3.16, C++20 compiler
 
-### Quick Install
+### Quick install
 
 ```bash
 ./install.sh
 ```
 
-The install script auto-detects your distribution (Arch, Debian/Ubuntu, Fedora, openSUSE), installs missing dependencies, builds, and installs both variants.
+The script auto-detects your distribution (Arch, Debian/Ubuntu, Fedora, openSUSE), installs missing dependencies, builds, runs the test suite, and installs the module. It is **idempotent** — re-running cleans stale installations first.
 
-### Manual Build
+### Manual build
 
 ```bash
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-sudo cmake --install .
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+sudo cmake --install build
 ```
 
 ### Setup
 
-**Module variant (recommended):**
-1. Log out and back in
-2. vimotion-module loads automatically with Fcitx5
-3. Press `Ctrl+Escape` to toggle vimotion on — `[N]` appears
-4. Press `i` for Insert Mode `[I]`, `Escape` to return to Normal Mode
-5. Press `Ctrl+Escape` again to toggle off
-
-**Input Method variant:**
-1. Log out and back in
-2. Open `fcitx5-configtool`
-3. Go to **Input Method** → click **+** → search **vimotion** → add it
-4. Switch to vimotion with your trigger key (default: `Ctrl+Space`)
-5. You start in **Normal Mode** `[N]`
+1. Log out and back in (so the env vars take effect).
+2. The module is loaded automatically with Fcitx5.
+3. Press `Ctrl+Escape` (default toggle) — `[N]` appears in the input panel.
+4. Press `i` for Insert Mode `[I]`, `Escape` (or your `jk` mapping) to return.
+5. Press `Ctrl+Escape` again to toggle off.
 
 ### Uninstall
 
 ```bash
 ./uninstall.sh
 ```
+
+## Configuration
+
+Open `fcitx5-configtool` → **Addons** → **vimotion** (or edit `~/.config/fcitx5/conf/vimotion-module.conf` directly).
+
+| Section | Key | Default | Description |
+|---|---|---|---|
+| `General` | `EnabledByDefault` | `False` | Auto-enable Normal Mode for every new input context |
+| `General` | `ToggleKey` | `Control+Escape` | Hotkey list that toggles vimotion on/off |
+| `AppFilter` | `Mode` | `Blacklist` | `None`, `Blacklist`, or `Whitelist` |
+| `AppFilter` | `Blacklist` | `nvim, vim, neovim` | Substring match against the app's program name |
+| `AppFilter` | `Whitelist` | *empty* | Only active in these apps when `Mode=Whitelist` |
+| `Mappings` | `TimeoutMs` | `200` | Sequence timeout (50–2000 ms) |
+| `Mappings` | `InsertMap` | `jk=Escape` | List of `<sequence>=<keysym>` mappings, applied in Insert Mode |
+
+### Insert-mode key sequences
+
+Like neovim's `inoremap jk <Esc>`, `vimotion` supports multi-key sequences in Insert Mode. Each entry has the form `<sequence>=<key>`:
+
+```
+jk=Escape
+jj=Return
+kj=Escape
+```
+
+- The sequence is held only as long as `TimeoutMs`. If the next key isn't part of any mapping, the buffered keys are forwarded as-is and the new key passes through unchanged.
+- If the target is `Escape`, vimotion switches to Normal Mode (it does *not* forward Escape to the underlying app).
+- Any other target key is forwarded directly.
+
+## Tests
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+70 tests cover toggling, motions, operators, count prefixes, per-IC state, app filters, custom toggle keys, `EnabledByDefault`, and the Insert-mode sequence matcher.
 
 ## License
 

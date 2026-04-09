@@ -1,13 +1,13 @@
 add_library(vimotion-module MODULE
     src/vimotion_module.cpp
-    ../addon/src/motions.cpp
+    src/motions.cpp
 )
 
-target_link_libraries(vimotion-module PRIVATE Fcitx5::Core)
+target_link_libraries(vimotion-module PRIVATE Fcitx5::Core Fcitx5::Utils)
 target_include_directories(vimotion-module PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/addon/src
 )
+target_compile_options(vimotion-module PRIVATE -Wall -Wextra -Wpedantic)
 set_target_properties(vimotion-module PROPERTIES PREFIX "")
 
 configure_file(vimotion-module.conf.in vimotion-module.conf @ONLY)

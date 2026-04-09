@@ -1,421 +1,463 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# vimotion installer — bulletproof, idempotent, distro-aware.
+#
+# Strict mode:
+#   -E  ERR trap propagates into subshells/functions
+#   -e  exit on any non-zero return
+#   -u  unset variables are errors
+#   -o pipefail  any failure in a pipeline fails the whole pipe
+set -Eeuo pipefail
+IFS=$'\n\t'
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+#-----------------------------------------------------------------------
+# Constants & helpers
+#-----------------------------------------------------------------------
+readonly PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly BUILD_DIR="${PROJECT_ROOT}/build"
+readonly LOG_FILE="${PROJECT_ROOT}/install.log"
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  vimotion - Installation${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo
+readonly RED=$'\033[0;31m'
+readonly GREEN=$'\033[0;32m'
+readonly YELLOW=$'\033[1;33m'
+readonly BLUE=$'\033[0;34m'
+readonly NC=$'\033[0m'
 
-# --- Distribution Detection ---
+log()  { printf '%s\n' "$*" | /usr/bin/tee -a "${LOG_FILE}" >&2; }
+info() { log "${BLUE}$*${NC}"; }
+ok()   { log "${GREEN}$*${NC}"; }
+warn() { log "${YELLOW}$*${NC}"; }
+err()  { log "${RED}$*${NC}"; }
 
+die() {
+    err "Error: $*"
+    err "See ${LOG_FILE} for details."
+    exit 1
+}
+
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    err "Aborted at line ${line_no} (exit ${exit_code})."
+    err "See ${LOG_FILE} for details."
+    exit "${exit_code}"
+}
+trap 'on_error ${LINENO}' ERR
+
+require_cmd() {
+    local cmd
+    for cmd in "$@"; do
+        /usr/bin/command -v "${cmd}" >/dev/null 2>&1 \
+            || die "Required command not found: ${cmd}"
+    done
+}
+
+#-----------------------------------------------------------------------
+# Header
+#-----------------------------------------------------------------------
+: > "${LOG_FILE}"
+info "========================================"
+info "  vimotion - Installation"
+info "========================================"
+log
+
+#-----------------------------------------------------------------------
+# Sanity checks
+#-----------------------------------------------------------------------
+if [[ ${EUID} -eq 0 ]]; then
+    die "Do not run this script as root. Sudo will be requested when needed."
+fi
+
+require_cmd /usr/bin/uname /usr/bin/tee
+# sudo is required for installing files into system directories
+require_cmd sudo
+
+#-----------------------------------------------------------------------
+# Distribution detection
+#-----------------------------------------------------------------------
 detect_distro() {
-    if [ -f /etc/os-release ]; then
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
         . /etc/os-release
-        case "$ID" in
-            arch|manjaro|endeavouros|garuda|artix|cachyos)
-                echo "arch" ;;
+        case "${ID:-}" in
+            arch|manjaro|endeavouros|garuda|artix|cachyos) echo arch ;;
             debian|ubuntu|linuxmint|pop|kali|elementary|zorin|mx|neon)
-                echo "debian" ;;
-            fedora|nobara)
-                echo "fedora" ;;
-            opensuse*|suse)
-                echo "suse" ;;
+                echo debian ;;
+            fedora|nobara) echo fedora ;;
+            opensuse*|suse) echo suse ;;
             *)
-                # Fallback to ID_LIKE
                 case "${ID_LIKE:-}" in
-                    *arch*)                 echo "arch" ;;
-                    *debian*|*ubuntu*)      echo "debian" ;;
-                    *fedora*)               echo "fedora" ;;
-                    *suse*)                 echo "suse" ;;
-                    *)                      echo "unknown" ;;
+                    *arch*) echo arch ;;
+                    *debian*|*ubuntu*) echo debian ;;
+                    *fedora*) echo fedora ;;
+                    *suse*) echo suse ;;
+                    *) echo unknown ;;
                 esac ;;
         esac
-    elif command -v pacman >/dev/null 2>&1; then
-        echo "arch"
-    elif command -v apt >/dev/null 2>&1; then
-        echo "debian"
-    elif command -v dnf >/dev/null 2>&1; then
-        echo "fedora"
-    elif command -v zypper >/dev/null 2>&1; then
-        echo "suse"
-    else
-        echo "unknown"
+    elif /usr/bin/command -v pacman >/dev/null 2>&1; then echo arch
+    elif /usr/bin/command -v apt    >/dev/null 2>&1; then echo debian
+    elif /usr/bin/command -v dnf    >/dev/null 2>&1; then echo fedora
+    elif /usr/bin/command -v zypper >/dev/null 2>&1; then echo suse
+    else echo unknown
     fi
 }
 
-DISTRO=$(detect_distro)
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+readonly DISTRO="$(detect_distro)"
 
-# Show detected distro
-if [ -f /etc/os-release ]; then
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
     . /etc/os-release
-    DISTRO_NAME="${PRETTY_NAME:-$ID}"
+    DISTRO_NAME="${PRETTY_NAME:-${ID:-Unknown}}"
 else
     DISTRO_NAME="Unknown"
 fi
+readonly DISTRO_NAME
 
-echo -e "${BLUE}Distribution:${NC} $DISTRO_NAME"
-echo
+info "Distribution: ${DISTRO_NAME} (${DISTRO})"
+log
 
-case "$DISTRO" in
-    arch)
-        echo -e "${GREEN}Arch Linux installer${NC}"
-        ;;
-    debian)
-        echo -e "${GREEN}Debian/Ubuntu installer${NC}"
-        ;;
-    fedora)
-        echo -e "${GREEN}Fedora installer${NC}"
-        ;;
-    suse)
-        echo -e "${GREEN}openSUSE installer${NC}"
-        ;;
+case "${DISTRO}" in
+    arch|debian|fedora|suse) ;;
     *)
-        echo -e "${RED}Error: Unsupported distribution: $DISTRO_NAME${NC}"
-        echo
-        echo -e "${YELLOW}Supported distributions:${NC}"
-        echo "  - Arch Linux and derivatives (Manjaro, EndeavourOS, Garuda, CachyOS, ...)"
-        echo "  - Debian and derivatives (Ubuntu, Linux Mint, Pop!_OS, Kali, ...)"
-        echo "  - Fedora and derivatives (Nobara, ...)"
-        echo "  - openSUSE (Tumbleweed, Leap)"
-        echo
-        echo "Manual build:"
-        echo "  1. Install: fcitx5, fcitx5 dev libraries, cmake, g++"
-        echo "  2. mkdir build && cd build && cmake .. && make -j\$(nproc)"
-        echo "  3. sudo cmake --install ."
+        err "Unsupported distribution: ${DISTRO_NAME}"
+        log
+        warn "Supported families: Arch, Debian/Ubuntu, Fedora, openSUSE."
+        log
+        log "Manual build:"
+        log "  /usr/bin/cmake -S \"${PROJECT_ROOT}\" -B \"${BUILD_DIR}\""
+        log "  /usr/bin/cmake --build \"${BUILD_DIR}\" -j"
+        log "  sudo /usr/bin/cmake --install \"${BUILD_DIR}\""
         exit 1
         ;;
 esac
-echo
 
-# Check if running with sudo (should NOT be)
-if [ "$EUID" -eq 0 ]; then
-    echo -e "${RED}Error: Do not run this script with sudo!${NC}"
-    echo "Run as regular user. Sudo will be requested when needed."
-    exit 1
-fi
-
-# Warn about sudo requirement
-echo -e "${YELLOW}Note: This script will require sudo access for:${NC}"
-echo "  - Installing dependencies (if missing)"
-echo "  - Installing the addon to system directories"
-echo "You may be prompted for your password."
-echo
-
-# --- Dependency Management ---
-
+#-----------------------------------------------------------------------
+# Dependencies
+#-----------------------------------------------------------------------
 is_installed() {
-    case "$DISTRO" in
-        arch)           pacman -Q "$1" >/dev/null 2>&1 ;;
-        debian)         dpkg -l "$1" 2>/dev/null | grep -q "^ii" ;;
-        fedora|suse)    rpm -q "$1" >/dev/null 2>&1 ;;
+    case "${DISTRO}" in
+        arch)        /usr/bin/pacman -Q "$1" >/dev/null 2>&1 ;;
+        debian)      /usr/bin/dpkg -l "$1" 2>/dev/null \
+                        | /usr/bin/grep -q '^ii' ;;
+        fedora|suse) /usr/bin/rpm -q "$1" >/dev/null 2>&1 ;;
     esac
 }
 
 install_deps() {
-    case "$DISTRO" in
+    case "${DISTRO}" in
         arch)
-            sudo pacman -S --needed "$@"
+            sudo /usr/bin/pacman -S --needed --noconfirm "$@"
             ;;
         debian)
-            echo -e "${BLUE}Updating package list...${NC}"
-            sudo apt update
-            sudo apt install -y "$@"
+            info "Updating package list..."
+            sudo /usr/bin/apt-get update
+            sudo /usr/bin/apt-get install -y --no-install-recommends "$@"
             ;;
         fedora)
-            sudo dnf install -y "$@"
+            sudo /usr/bin/dnf install -y "$@"
             ;;
         suse)
-            sudo zypper install -y "$@"
+            sudo /usr/bin/zypper --non-interactive install "$@"
             ;;
     esac
 }
 
-case "$DISTRO" in
+case "${DISTRO}" in
     arch)
-        DEPS=(fcitx5 fcitx5-configtool fcitx5-qt fcitx5-gtk cmake gcc)
-        ;;
+        DEPS=(fcitx5 fcitx5-configtool fcitx5-qt fcitx5-gtk cmake gcc) ;;
     debian)
-        DEPS=(fcitx5 fcitx5-config-qt fcitx5-frontend-gtk3 fcitx5-frontend-gtk4
-              fcitx5-frontend-qt5 libfcitx5core-dev fcitx5-modules-dev
-              cmake g++)
-        ;;
+        DEPS=(fcitx5 fcitx5-config-qt fcitx5-frontend-gtk3
+              fcitx5-frontend-gtk4 fcitx5-frontend-qt5 libfcitx5core-dev
+              fcitx5-modules-dev cmake g++) ;;
     fedora)
         DEPS=(fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-qt6
-              fcitx5-devel cmake gcc-c++)
-        ;;
+              fcitx5-devel cmake gcc-c++) ;;
     suse)
         DEPS=(fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-qt6
-              fcitx5-devel cmake gcc-c++)
-        ;;
+              fcitx5-devel cmake gcc-c++) ;;
 esac
 
+info "Checking dependencies..."
 MISSING_DEPS=()
-
-echo -e "${YELLOW}Checking dependencies...${NC}"
 for dep in "${DEPS[@]}"; do
-    if is_installed "$dep"; then
-        echo -e "  ${GREEN}✓${NC} $dep"
+    if is_installed "${dep}"; then
+        log "  ${GREEN}✓${NC} ${dep}"
     else
-        echo -e "  ${RED}✗${NC} $dep (missing)"
-        MISSING_DEPS+=("$dep")
+        log "  ${RED}✗${NC} ${dep} (missing)"
+        MISSING_DEPS+=("${dep}")
     fi
 done
-echo
+log
 
-if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
-    echo -e "${YELLOW}Missing dependencies: ${MISSING_DEPS[*]}${NC}"
-    read -p "Install missing dependencies? [Y/n] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        echo -e "${BLUE}Installing dependencies...${NC}"
+if (( ${#MISSING_DEPS[@]} > 0 )); then
+    warn "Missing: ${MISSING_DEPS[*]}"
+    read -r -p "Install missing dependencies? [Y/n] " reply || reply=""
+    if [[ ! "${reply}" =~ ^[Nn]$ ]]; then
         install_deps "${MISSING_DEPS[@]}"
-        echo -e "${GREEN}✓ Dependencies installed${NC}"
-        echo
+        ok "✓ Dependencies installed"
     else
-        echo -e "${RED}Cannot proceed without dependencies.${NC}"
-        exit 1
+        die "Cannot proceed without dependencies."
     fi
 else
-    echo -e "${GREEN}✓ All dependencies already installed${NC}"
-    echo
+    ok "✓ All dependencies present"
+fi
+log
+
+#-----------------------------------------------------------------------
+# Verify required tools after dependency install
+#-----------------------------------------------------------------------
+require_cmd /usr/bin/cmake
+if /usr/bin/command -v /usr/bin/c++ >/dev/null 2>&1; then
+    : # OK
+elif /usr/bin/command -v /usr/bin/g++ >/dev/null 2>&1; then
+    : # OK
+else
+    die "No C++ compiler (c++/g++) found in /usr/bin."
 fi
 
-# --- Build ---
-
-echo -e "${BLUE}Building addon...${NC}"
-cd "$PROJECT_ROOT" || { echo -e "${RED}Error: project directory not found${NC}"; exit 1; }
-
-rm -rf build
-mkdir -p build
-cd build
-
-echo "Configuring with CMake..."
-cmake ..
-
-echo "Building..."
-make -j"$(nproc)"
-
-echo -e "${GREEN}✓ Build successful!${NC}"
-echo
-
-# --- Remove Stale Installations ---
-
-STALE_CANDIDATES=(
+#-----------------------------------------------------------------------
+# Stale installation detection (BEFORE building, so we can warn early)
+#-----------------------------------------------------------------------
+STALE_LIB_CANDIDATES=(
     /usr/lib/fcitx5/vimotion.so
+    /usr/lib/fcitx5/vimotion-module.so
     /usr/lib64/fcitx5/vimotion.so
-    /usr/share/fcitx5/addon/vimotion.conf
-    /usr/share/fcitx5/inputmethod/vimotion-im.conf
+    /usr/lib64/fcitx5/vimotion-module.so
     /usr/local/lib/fcitx5/vimotion.so
+    /usr/local/lib/fcitx5/vimotion-module.so
     /usr/local/lib64/fcitx5/vimotion.so
+    /usr/local/lib64/fcitx5/vimotion-module.so
+)
+STALE_DATA_CANDIDATES=(
+    /usr/share/fcitx5/addon/vimotion.conf
+    /usr/share/fcitx5/addon/vimotion-module.conf
+    /usr/share/fcitx5/inputmethod/vimotion-im.conf
     /usr/local/share/fcitx5/addon/vimotion.conf
+    /usr/local/share/fcitx5/addon/vimotion-module.conf
     /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
 )
 
-# Debian uses multiarch lib paths
-if [ "$DISTRO" = "debian" ]; then
-    STALE_CANDIDATES+=(
+if [[ "${DISTRO}" == "debian" ]]; then
+    STALE_LIB_CANDIDATES+=(
         /usr/lib/x86_64-linux-gnu/fcitx5/vimotion.so
+        /usr/lib/x86_64-linux-gnu/fcitx5/vimotion-module.so
         /usr/lib/aarch64-linux-gnu/fcitx5/vimotion.so
+        /usr/lib/aarch64-linux-gnu/fcitx5/vimotion-module.so
         /usr/local/lib/x86_64-linux-gnu/fcitx5/vimotion.so
+        /usr/local/lib/x86_64-linux-gnu/fcitx5/vimotion-module.so
         /usr/local/lib/aarch64-linux-gnu/fcitx5/vimotion.so
+        /usr/local/lib/aarch64-linux-gnu/fcitx5/vimotion-module.so
     )
 fi
 
 STALE_FILES=()
-for stale in "${STALE_CANDIDATES[@]}"; do
-    if [ -f "$stale" ]; then
-        STALE_FILES+=("$stale")
-    fi
+for f in "${STALE_LIB_CANDIDATES[@]}" "${STALE_DATA_CANDIDATES[@]}"; do
+    [[ -f "${f}" ]] && STALE_FILES+=("${f}")
 done
 
-if [ ${#STALE_FILES[@]} -ne 0 ]; then
-    echo -e "${YELLOW}Found previous installation files:${NC}"
-    for file in "${STALE_FILES[@]}"; do
-        echo "  - $file"
+if (( ${#STALE_FILES[@]} > 0 )); then
+    warn "Found previous installation files:"
+    for f in "${STALE_FILES[@]}"; do
+        log "  - ${f}"
     done
-    echo
-    read -p "Remove before reinstalling? [Y/n] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        sudo rm -f "${STALE_FILES[@]}"
-        echo -e "${GREEN}✓ Old installation removed${NC}"
+    log
+    read -r -p "Remove before reinstalling? [Y/n] " reply || reply=""
+    if [[ ! "${reply}" =~ ^[Nn]$ ]]; then
+        sudo /usr/bin/rm -f -- "${STALE_FILES[@]}"
+        ok "✓ Old installation removed"
     else
-        echo -e "${RED}Warning: Old files may conflict with the new installation!${NC}"
+        warn "Old files may conflict with the new installation"
     fi
-    echo
+    log
 fi
 
-# --- Install ---
+#-----------------------------------------------------------------------
+# Build (out-of-source, idempotent: rm -rf build/ first)
+#-----------------------------------------------------------------------
+info "Building vimotion..."
+if [[ -e "${BUILD_DIR}" && ! -d "${BUILD_DIR}" ]]; then
+    die "${BUILD_DIR} exists but is not a directory."
+fi
+/usr/bin/rm -rf -- "${BUILD_DIR}"
+/usr/bin/mkdir -p -- "${BUILD_DIR}"
 
-echo -e "${BLUE}Installing addon...${NC}"
-sudo cmake --install .
-echo -e "${GREEN}✓ Addon installed${NC}"
-echo
+/usr/bin/cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" \
+    -DCMAKE_BUILD_TYPE=Release
+/usr/bin/cmake --build "${BUILD_DIR}" -j "$(/usr/bin/nproc)"
+ok "✓ Build successful"
+log
 
-# --- Environment Variables ---
+#-----------------------------------------------------------------------
+# Tests (best-effort)
+#-----------------------------------------------------------------------
+info "Running tests..."
+if (cd "${BUILD_DIR}" && /usr/bin/ctest --output-on-failure); then
+    ok "✓ Tests passed"
+else
+    warn "Tests reported failures — continuing anyway."
+fi
+log
 
-cd "$PROJECT_ROOT"
+#-----------------------------------------------------------------------
+# Install
+#-----------------------------------------------------------------------
+info "Installing vimotion (sudo)..."
+sudo /usr/bin/cmake --install "${BUILD_DIR}"
+ok "✓ Module installed"
+log
 
-ENV_FILE="$HOME/.config/environment.d/fcitx5.conf"
-echo -e "${BLUE}Setting up environment variables...${NC}"
+#-----------------------------------------------------------------------
+# Verify install actually placed the .so somewhere fcitx will find it
+#-----------------------------------------------------------------------
+INSTALLED=()
+for f in "${STALE_LIB_CANDIDATES[@]}"; do
+    [[ -f "${f}" ]] && INSTALLED+=("${f}")
+done
+if (( ${#INSTALLED[@]} == 0 )); then
+    die "Install completed but vimotion-module.so was not found in any known fcitx5 addon directory."
+fi
+ok "Installed library:"
+for f in "${INSTALLED[@]}"; do
+    log "  - ${f}"
+done
+log
 
-mkdir -p "$HOME/.config/environment.d"
+#-----------------------------------------------------------------------
+# Environment variables
+#-----------------------------------------------------------------------
+ENV_FILE="${HOME}/.config/environment.d/fcitx5.conf"
+info "Configuring environment variables..."
+/usr/bin/mkdir -p -- "${HOME}/.config/environment.d"
 
 write_env_file() {
-    cat > "$ENV_FILE" << 'EOF'
+    /usr/bin/tee "${ENV_FILE}" >/dev/null <<'EOF'
 GTK_IM_MODULE=fcitx
 QT_IM_MODULE=fcitx
 XMODIFIERS=@im=fcitx
 GLFW_IM_MODULE=ibus
 EOF
-    echo -e "${GREEN}✓ Environment variables configured${NC}"
+    ok "✓ Environment variables configured"
 }
 
-if [ -f "$ENV_FILE" ]; then
-    echo -e "${YELLOW}Environment file already exists: $ENV_FILE${NC}"
-    echo "Contents:"
-    cat "$ENV_FILE"
-    echo
-    read -p "Overwrite with fcitx5 settings? [Y/n] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        echo -e "${YELLOW}Skipping environment setup. Make sure GTK_IM_MODULE, QT_IM_MODULE, and XMODIFIERS are set to fcitx.${NC}"
+if [[ -f "${ENV_FILE}" ]]; then
+    warn "Environment file already exists: ${ENV_FILE}"
+    log "Current contents:"
+    /usr/bin/sed 's/^/    /' "${ENV_FILE}" | /usr/bin/tee -a "${LOG_FILE}" >&2
+    read -r -p "Overwrite with fcitx5 settings? [Y/n] " reply || reply=""
+    if [[ "${reply}" =~ ^[Nn]$ ]]; then
+        warn "Skipped environment setup."
     else
         write_env_file
     fi
 else
     write_env_file
 fi
-echo
+log
 
-# --- Debian: im-config ---
-
-if [ "$DISTRO" = "debian" ]; then
-    echo -e "${BLUE}Configuring input method framework...${NC}"
-    if ! command -v im-config >/dev/null 2>&1; then
-        echo -e "${YELLOW}Installing im-config...${NC}"
-        sudo apt install -y im-config
+#-----------------------------------------------------------------------
+# Debian: im-config
+#-----------------------------------------------------------------------
+if [[ "${DISTRO}" == "debian" ]]; then
+    info "Configuring input method framework..."
+    if ! /usr/bin/command -v im-config >/dev/null 2>&1; then
+        warn "Installing im-config..."
+        sudo /usr/bin/apt-get install -y im-config
     fi
-    im-config -n fcitx5 2>/dev/null || true
-    echo -e "${GREEN}✓ Fcitx5 set as default input method${NC}"
-    echo
+    im-config -n fcitx5 >/dev/null 2>&1 || true
+    ok "✓ Fcitx5 set as default input method"
+    log
 fi
 
-# --- KDE Wayland: Disable Duplicate Autostart ---
+#-----------------------------------------------------------------------
+# Autostart handling (KDE-Wayland disables duplicate autostart)
+#-----------------------------------------------------------------------
+SESSION="${XDG_SESSION_TYPE:-}"
+DESKTOP="${XDG_CURRENT_DESKTOP:-}"
 
-if [ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
-    AUTOSTART_FILE="$HOME/.config/autostart/org.fcitx.Fcitx5.desktop"
-    if [ ! -f "$AUTOSTART_FILE" ] || ! grep -q "Hidden=true" "$AUTOSTART_FILE"; then
-        echo -e "${BLUE}Disabling redundant fcitx5 autostart (KWin handles this)...${NC}"
-        mkdir -p "$HOME/.config/autostart"
-        cat > "$AUTOSTART_FILE" << 'EOF'
+if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
+    AUTOSTART_FILE="${HOME}/.config/autostart/org.fcitx.Fcitx5.desktop"
+    if [[ ! -f "${AUTOSTART_FILE}" ]] || \
+       ! /usr/bin/grep -q '^Hidden=true' "${AUTOSTART_FILE}"; then
+        info "Disabling redundant fcitx5 autostart (KWin handles this)..."
+        /usr/bin/mkdir -p -- "${HOME}/.config/autostart"
+        /usr/bin/tee "${AUTOSTART_FILE}" >/dev/null <<'EOF'
 [Desktop Entry]
 Hidden=true
 EOF
-        echo -e "${GREEN}✓ Duplicate autostart disabled${NC}"
+        ok "✓ Duplicate autostart disabled"
     fi
-fi
-
-# --- Non-Arch (non-KDE-Wayland): Setup Autostart ---
-
-if [ "$DISTRO" != "arch" ]; then
-    if ! ([ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]); then
-        echo -e "${BLUE}Setting up autostart...${NC}"
-        AUTOSTART_DIR="$HOME/.config/autostart"
-        mkdir -p "$AUTOSTART_DIR"
-
-        if [ -f /usr/share/applications/org.fcitx.Fcitx5.desktop ]; then
-            cp /usr/share/applications/org.fcitx.Fcitx5.desktop "$AUTOSTART_DIR/"
-            echo -e "${GREEN}✓ Fcitx5 will autostart on login${NC}"
-        elif [ -f /usr/share/applications/fcitx5.desktop ]; then
-            cp /usr/share/applications/fcitx5.desktop "$AUTOSTART_DIR/"
-            echo -e "${GREEN}✓ Fcitx5 will autostart on login${NC}"
-        else
-            echo -e "${YELLOW}Could not find Fcitx5 desktop file for autostart${NC}"
-            echo "  You may need to manually add Fcitx5 to startup applications"
-        fi
-    fi
-fi
-echo
-
-# --- Restart Fcitx5 ---
-
-echo -e "${BLUE}Checking Fcitx5 status...${NC}"
-if pgrep -x fcitx5 > /dev/null; then
-    if [ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
-        fcitx5-remote -r 2>/dev/null && \
-            echo -e "${GREEN}✓ Fcitx5 config reloaded${NC}" || \
-            echo -e "${YELLOW}Could not reload fcitx5 config${NC}"
-        echo -e "${YELLOW}  To fully restart fcitx5: right-click the system tray icon → Exit${NC}"
-        echo -e "${YELLOW}  KWin will restart it automatically${NC}"
+elif [[ "${DISTRO}" != "arch" ]]; then
+    info "Setting up autostart..."
+    AUTOSTART_DIR="${HOME}/.config/autostart"
+    /usr/bin/mkdir -p -- "${AUTOSTART_DIR}"
+    if   [[ -f /usr/share/applications/org.fcitx.Fcitx5.desktop ]]; then
+        /usr/bin/cp -- /usr/share/applications/org.fcitx.Fcitx5.desktop \
+                       "${AUTOSTART_DIR}/"
+        ok "✓ Fcitx5 will autostart on login"
+    elif [[ -f /usr/share/applications/fcitx5.desktop ]]; then
+        /usr/bin/cp -- /usr/share/applications/fcitx5.desktop "${AUTOSTART_DIR}/"
+        ok "✓ Fcitx5 will autostart on login"
     else
-        killall fcitx5 2>/dev/null || true
-        sleep 1
-        fcitx5 -d 2>/dev/null &
-        sleep 2
-        if pgrep -x fcitx5 > /dev/null; then
-            echo -e "${GREEN}✓ Fcitx5 restarted successfully${NC}"
+        warn "Could not find Fcitx5 desktop file for autostart"
+    fi
+fi
+log
+
+#-----------------------------------------------------------------------
+# Restart fcitx5
+#-----------------------------------------------------------------------
+info "Reloading Fcitx5..."
+if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
+    if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
+        if /usr/bin/command -v fcitx5-remote >/dev/null 2>&1; then
+            fcitx5-remote -r >/dev/null 2>&1 && \
+                ok "✓ Fcitx5 config reloaded" || \
+                warn "fcitx5-remote -r failed"
+        fi
+        warn "  Right-click the tray icon → Exit, KWin will restart it."
+    else
+        /usr/bin/pkill -x fcitx5 >/dev/null 2>&1 || true
+        /usr/bin/sleep 1
+        ( /usr/bin/setsid fcitx5 -d >/dev/null 2>&1 & ) || true
+        /usr/bin/sleep 2
+        if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
+            ok "✓ Fcitx5 restarted"
         else
-            echo -e "${YELLOW}Fcitx5 stopped (will start on next login)${NC}"
+            warn "Fcitx5 not running yet — start it manually or relogin."
         fi
     fi
 else
-    echo -e "${YELLOW}Fcitx5 not running yet${NC}"
-    echo -e "${YELLOW}  It will start automatically on next login${NC}"
+    warn "Fcitx5 not running — it will start on next login."
 fi
-echo
+log
 
-# --- Final Instructions ---
-
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Installation Complete!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo
-echo -e "${YELLOW}IMPORTANT: Next Steps${NC}"
-echo
-echo -e "1. ${RED}LOGOUT AND LOGIN${NC} for environment variables to take effect"
-echo
-echo "2. After login, configure Fcitx5:"
-echo -e "   ${BLUE}fcitx5-config-qt${NC}"
-echo
-echo "3. In the configuration window:"
-echo "   - Go to 'Input Method' tab"
-echo "   - Click '+' to add"
-echo "   - Search for 'vimotion'"
-echo "   - Add it to your input methods"
-echo
-echo "4. Switch to vimotion using your trigger key (default: Ctrl+Space)"
-echo
-echo "5. You start in Normal Mode [N]:"
-echo "   - h/j/k/l to move cursor"
-echo "   - i to enter Insert Mode [I] (normal typing)"
-echo "   - Escape to return to Normal Mode"
-echo "   - dd to delete a line, yy to copy, p to paste"
-echo
-echo -e "${YELLOW}Troubleshooting:${NC}"
-echo "  - Run 'fcitx5-diagnose' to check setup"
-if [ "$DISTRO" != "arch" ]; then
-    echo "  - Make sure IBus is not running: pkill ibus-daemon"
-    echo "  - Check env vars after login: echo \$GTK_IM_MODULE"
-fi
-echo "  - See README.md for more help"
-echo
-if [ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
-    echo -e "${BLUE}For KDE Wayland users:${NC}"
-    echo "  Set 'System Settings → Virtual Keyboard' to 'Fcitx 5'"
-    echo
-fi
-if [ "$XDG_CURRENT_DESKTOP" = "GNOME" ]; then
-    echo -e "${BLUE}GNOME Users:${NC}"
-    echo "  If Fcitx5 doesn't work in GNOME apps, try:"
-    echo "  gsettings set org.gnome.settings-daemon.plugins.xsettings overrides \"{'Gtk/IMModule':<'fcitx'>}\""
-    echo
-fi
+#-----------------------------------------------------------------------
+# Final instructions
+#-----------------------------------------------------------------------
+ok "========================================"
+ok "  Installation Complete!"
+ok "========================================"
+log
+warn "Next steps:"
+log
+log "1. ${RED}LOG OUT and back IN${NC} so the env vars take effect."
+log
+log "2. The vimotion module is loaded automatically with Fcitx5."
+log "   Default toggle: ${BLUE}Ctrl+Escape${NC}"
+log "   Configure via:  ${BLUE}fcitx5-configtool${NC} → Addons → vimotion"
+log
+log "3. In Normal Mode [N]:"
+log "     h j k l   move cursor"
+log "     w b e     word motions"
+log "     i a I A   enter Insert Mode [I]"
+log "     dd yy p   delete / yank / paste"
+log "     gg G      document start / end"
+log "     3j 5x     count prefix"
+log
+log "4. To return to Normal Mode from Insert Mode, press ${BLUE}Escape${NC}"
+log "   or use a configured mapping like ${BLUE}jk${NC}."
+log
+warn "Troubleshooting:"
+log "  - fcitx5-diagnose"
+log "  - tail -f ${LOG_FILE}"
+log "  - README.md"
+log

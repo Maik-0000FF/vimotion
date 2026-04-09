@@ -1,218 +1,251 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# vimotion uninstaller — bulletproof, idempotent.
+set -Eeuo pipefail
+IFS=$'\n\t'
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+readonly PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly LOG_FILE="${PROJECT_ROOT}/uninstall.log"
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  vimotion - Uninstallation${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo
+readonly RED=$'\033[0;31m'
+readonly GREEN=$'\033[0;32m'
+readonly YELLOW=$'\033[1;33m'
+readonly BLUE=$'\033[0;34m'
+readonly NC=$'\033[0m'
 
-# --- Distribution Detection ---
+log()  { printf '%s\n' "$*" | /usr/bin/tee -a "${LOG_FILE}" >&2; }
+info() { log "${BLUE}$*${NC}"; }
+ok()   { log "${GREEN}$*${NC}"; }
+warn() { log "${YELLOW}$*${NC}"; }
+err()  { log "${RED}$*${NC}"; }
 
-detect_distro() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        case "$ID" in
-            arch|manjaro|endeavouros|garuda|artix|cachyos)
-                echo "arch" ;;
-            debian|ubuntu|linuxmint|pop|kali|elementary|zorin|mx|neon)
-                echo "debian" ;;
-            fedora|nobara)
-                echo "fedora" ;;
-            opensuse*|suse)
-                echo "suse" ;;
-            *)
-                case "${ID_LIKE:-}" in
-                    *arch*)                 echo "arch" ;;
-                    *debian*|*ubuntu*)      echo "debian" ;;
-                    *fedora*)               echo "fedora" ;;
-                    *suse*)                 echo "suse" ;;
-                    *)                      echo "unknown" ;;
-                esac ;;
-        esac
-    elif command -v pacman >/dev/null 2>&1; then
-        echo "arch"
-    elif command -v apt >/dev/null 2>&1; then
-        echo "debian"
-    elif command -v dnf >/dev/null 2>&1; then
-        echo "fedora"
-    elif command -v zypper >/dev/null 2>&1; then
-        echo "suse"
-    else
-        echo "unknown"
-    fi
+die() {
+    err "Error: $*"
+    err "See ${LOG_FILE} for details."
+    exit 1
 }
 
-DISTRO=$(detect_distro)
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    err "Aborted at line ${line_no} (exit ${exit_code})."
+    exit "${exit_code}"
+}
+trap 'on_error ${LINENO}' ERR
 
-if [ -f /etc/os-release ]; then
+: > "${LOG_FILE}"
+info "========================================"
+info "  vimotion - Uninstallation"
+info "========================================"
+log
+
+if [[ ${EUID} -eq 0 ]]; then
+    die "Do not run this script as root. Sudo will be requested when needed."
+fi
+
+if ! /usr/bin/command -v sudo >/dev/null 2>&1; then
+    die "sudo not found — required to remove system files."
+fi
+
+#-----------------------------------------------------------------------
+# Distribution detection (only used for the closing reminder)
+#-----------------------------------------------------------------------
+detect_distro() {
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        case "${ID:-}" in
+            arch|manjaro|endeavouros|garuda|artix|cachyos) echo arch ;;
+            debian|ubuntu|linuxmint|pop|kali|elementary|zorin|mx|neon)
+                echo debian ;;
+            fedora|nobara) echo fedora ;;
+            opensuse*|suse) echo suse ;;
+            *)
+                case "${ID_LIKE:-}" in
+                    *arch*) echo arch ;;
+                    *debian*|*ubuntu*) echo debian ;;
+                    *fedora*) echo fedora ;;
+                    *suse*) echo suse ;;
+                    *) echo unknown ;;
+                esac ;;
+        esac
+    else
+        echo unknown
+    fi
+}
+readonly DISTRO="$(detect_distro)"
+
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
     . /etc/os-release
-    DISTRO_NAME="${PRETTY_NAME:-$ID}"
+    DISTRO_NAME="${PRETTY_NAME:-${ID:-Unknown}}"
 else
     DISTRO_NAME="Unknown"
 fi
+readonly DISTRO_NAME
 
-echo -e "${BLUE}Distribution:${NC} $DISTRO_NAME"
-echo
+info "Distribution: ${DISTRO_NAME} (${DISTRO})"
+log
 
-# Check if running with sudo (should NOT be)
-if [ "$EUID" -eq 0 ]; then
-    echo -e "${RED}Error: Do not run this script with sudo!${NC}"
-    echo "Run as regular user. Sudo will be requested when needed."
-    exit 1
-fi
-
-# --- Find Installed Files ---
-
-# Check all possible library paths
+#-----------------------------------------------------------------------
+# Locate installed files
+#-----------------------------------------------------------------------
 LIB_PATHS=(
     /usr/lib/fcitx5
     /usr/lib64/fcitx5
     /usr/local/lib/fcitx5
     /usr/local/lib64/fcitx5
+    /usr/lib/x86_64-linux-gnu/fcitx5
+    /usr/lib/aarch64-linux-gnu/fcitx5
+    /usr/local/lib/x86_64-linux-gnu/fcitx5
+    /usr/local/lib/aarch64-linux-gnu/fcitx5
 )
-
-# Debian uses multiarch lib paths
-if [ "$DISTRO" = "debian" ] || [ "$DISTRO" = "unknown" ]; then
-    LIB_PATHS+=(
-        /usr/lib/x86_64-linux-gnu/fcitx5
-        /usr/lib/aarch64-linux-gnu/fcitx5
-        /usr/local/lib/x86_64-linux-gnu/fcitx5
-        /usr/local/lib/aarch64-linux-gnu/fcitx5
-    )
-fi
-
-FOUND_FILES=()
-
-for lib_path in "${LIB_PATHS[@]}"; do
-    [ -f "$lib_path/vimotion.so" ] && \
-        FOUND_FILES+=("$lib_path/vimotion.so")
-done
 
 DATA_FILES=(
     /usr/share/fcitx5/addon/vimotion.conf
+    /usr/share/fcitx5/addon/vimotion-module.conf
     /usr/share/fcitx5/inputmethod/vimotion-im.conf
     /usr/local/share/fcitx5/addon/vimotion.conf
+    /usr/local/share/fcitx5/addon/vimotion-module.conf
     /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
 )
 
-for file in "${DATA_FILES[@]}"; do
-    [ -f "$file" ] && FOUND_FILES+=("$file")
+FOUND_FILES=()
+for lib_path in "${LIB_PATHS[@]}"; do
+    for so in vimotion.so vimotion-module.so; do
+        [[ -f "${lib_path}/${so}" ]] && FOUND_FILES+=("${lib_path}/${so}")
+    done
+done
+for f in "${DATA_FILES[@]}"; do
+    [[ -f "${f}" ]] && FOUND_FILES+=("${f}")
 done
 
-if [ ${#FOUND_FILES[@]} -eq 0 ]; then
-    echo -e "${YELLOW}No installation found. Nothing to uninstall.${NC}"
-    exit 0
-fi
-
-echo -e "${YELLOW}Found installed files:${NC}"
-for file in "${FOUND_FILES[@]}"; do
-    echo "  - $file"
-done
-echo
-
-read -p "Remove these files? [y/N] " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Uninstallation cancelled.${NC}"
-    exit 0
-fi
-
-# --- Remove Files ---
-
-echo -e "${BLUE}Removing files (requires sudo)...${NC}"
-sudo rm -f "${FOUND_FILES[@]}"
-for file in "${FOUND_FILES[@]}"; do
-    echo -e "  ${GREEN}✓${NC} Removed: $file"
-done
-echo
-
-# --- Environment Variables ---
-
-ENV_FILE="$HOME/.config/environment.d/fcitx5.conf"
-if [ -f "$ENV_FILE" ]; then
-    echo -e "${YELLOW}Environment configuration found: $ENV_FILE${NC}"
-    read -p "Remove environment configuration? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -f "$ENV_FILE"
-        echo -e "${GREEN}✓ Environment configuration removed${NC}"
-        echo -e "${YELLOW}Note: Logout/login to apply changes${NC}"
-    else
-        echo -e "${YELLOW}Keeping environment configuration${NC}"
-    fi
-    echo
-fi
-
-# --- Autostart ---
-
-AUTOSTART_FILES=(
-    "$HOME/.config/autostart/org.fcitx.Fcitx5.desktop"
-    "$HOME/.config/autostart/fcitx5.desktop"
+# Per-user config (safe to nuke without sudo)
+USER_CONFIG_FILES=(
+    "${HOME}/.config/fcitx5/conf/vimotion-module.conf"
 )
 
+if (( ${#FOUND_FILES[@]} == 0 )) \
+   && [[ ! -f "${USER_CONFIG_FILES[0]}" ]]; then
+    warn "No installation found. Nothing to uninstall."
+    exit 0
+fi
+
+if (( ${#FOUND_FILES[@]} > 0 )); then
+    warn "Found installed files:"
+    for f in "${FOUND_FILES[@]}"; do
+        log "  - ${f}"
+    done
+    log
+fi
+if [[ -f "${USER_CONFIG_FILES[0]}" ]]; then
+    warn "Found user config:"
+    log "  - ${USER_CONFIG_FILES[0]}"
+    log
+fi
+
+read -r -p "Remove these files? [y/N] " reply || reply=""
+if [[ ! "${reply}" =~ ^[Yy]$ ]]; then
+    warn "Uninstallation cancelled."
+    exit 0
+fi
+
+#-----------------------------------------------------------------------
+# Remove
+#-----------------------------------------------------------------------
+if (( ${#FOUND_FILES[@]} > 0 )); then
+    info "Removing system files (sudo)..."
+    sudo /usr/bin/rm -f -- "${FOUND_FILES[@]}"
+    for f in "${FOUND_FILES[@]}"; do
+        ok "  ✓ Removed: ${f}"
+    done
+fi
+
+for f in "${USER_CONFIG_FILES[@]}"; do
+    if [[ -f "${f}" ]]; then
+        /usr/bin/rm -f -- "${f}"
+        ok "  ✓ Removed: ${f}"
+    fi
+done
+log
+
+#-----------------------------------------------------------------------
+# Optional: environment file & autostart cleanup
+#-----------------------------------------------------------------------
+ENV_FILE="${HOME}/.config/environment.d/fcitx5.conf"
+if [[ -f "${ENV_FILE}" ]]; then
+    warn "Environment file: ${ENV_FILE}"
+    read -r -p "Remove environment configuration? [y/N] " reply || reply=""
+    if [[ "${reply}" =~ ^[Yy]$ ]]; then
+        /usr/bin/rm -f -- "${ENV_FILE}"
+        ok "✓ Environment configuration removed"
+        warn "  Logout/login required for the change to apply."
+    else
+        warn "Keeping environment configuration."
+    fi
+    log
+fi
+
+AUTOSTART_FILES=(
+    "${HOME}/.config/autostart/org.fcitx.Fcitx5.desktop"
+    "${HOME}/.config/autostart/fcitx5.desktop"
+)
 for autostart in "${AUTOSTART_FILES[@]}"; do
-    if [ -f "$autostart" ]; then
-        echo -e "${YELLOW}Autostart configuration found: $autostart${NC}"
-        read -p "Remove autostart configuration? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -f "$autostart"
-            echo -e "${GREEN}✓ Autostart configuration removed${NC}"
+    if [[ -f "${autostart}" ]]; then
+        warn "Autostart file: ${autostart}"
+        read -r -p "Remove autostart? [y/N] " reply || reply=""
+        if [[ "${reply}" =~ ^[Yy]$ ]]; then
+            /usr/bin/rm -f -- "${autostart}"
+            ok "✓ Autostart removed"
         else
-            echo -e "${YELLOW}Keeping autostart configuration${NC}"
+            warn "Keeping autostart."
         fi
-        echo
+        log
         break
     fi
 done
 
-# --- Restart Fcitx5 ---
+#-----------------------------------------------------------------------
+# Restart fcitx5
+#-----------------------------------------------------------------------
+SESSION="${XDG_SESSION_TYPE:-}"
+DESKTOP="${XDG_CURRENT_DESKTOP:-}"
 
-echo -e "${BLUE}Restarting Fcitx5...${NC}"
-if pgrep -x fcitx5 > /dev/null; then
-    if [ "$XDG_SESSION_TYPE" = "wayland" ] && [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
-        fcitx5-remote -r 2>/dev/null && \
-            echo -e "${GREEN}✓ Fcitx5 config reloaded${NC}" || \
-            echo -e "${YELLOW}Could not reload fcitx5 config${NC}"
-        echo -e "${YELLOW}  Logout/login to fully apply changes${NC}"
+info "Reloading Fcitx5..."
+if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
+    if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
+        if /usr/bin/command -v fcitx5-remote >/dev/null 2>&1; then
+            fcitx5-remote -r >/dev/null 2>&1 && \
+                ok "✓ Fcitx5 config reloaded" || \
+                warn "fcitx5-remote -r failed"
+        fi
+        warn "  Logout/login to fully apply."
     else
-        killall fcitx5 2>/dev/null || pkill fcitx5 2>/dev/null || true
-        sleep 1
-        fcitx5 -d 2>/dev/null &
-        sleep 2
-        if pgrep -x fcitx5 > /dev/null; then
-            echo -e "${GREEN}✓ Fcitx5 restarted successfully${NC}"
+        /usr/bin/pkill -x fcitx5 >/dev/null 2>&1 || true
+        /usr/bin/sleep 1
+        ( /usr/bin/setsid fcitx5 -d >/dev/null 2>&1 & ) || true
+        /usr/bin/sleep 2
+        if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
+            ok "✓ Fcitx5 restarted"
         else
-            echo -e "${YELLOW}Fcitx5 stopped (will start on next login)${NC}"
+            warn "Fcitx5 not running."
         fi
     fi
 else
-    echo -e "${YELLOW}Fcitx5 not running${NC}"
+    warn "Fcitx5 not running."
 fi
-echo
+log
 
-# --- Done ---
-
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Uninstallation Complete!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo
-echo -e "${YELLOW}Notes:${NC}"
-case "$DISTRO" in
-    arch)   echo "  - Fcitx5 packages are still installed (remove with: sudo pacman -R fcitx5)" ;;
-    debian) echo "  - Fcitx5 packages are still installed (remove with: sudo apt remove fcitx5)" ;;
-    fedora) echo "  - Fcitx5 packages are still installed (remove with: sudo dnf remove fcitx5)" ;;
-    suse)   echo "  - Fcitx5 packages are still installed (remove with: sudo zypper remove fcitx5)" ;;
+ok "========================================"
+ok "  Uninstallation Complete!"
+ok "========================================"
+log
+warn "Notes:"
+case "${DISTRO}" in
+    arch)   log "  - Fcitx5 is still installed: sudo pacman -R fcitx5" ;;
+    debian) log "  - Fcitx5 is still installed: sudo apt remove fcitx5" ;;
+    fedora) log "  - Fcitx5 is still installed: sudo dnf remove fcitx5" ;;
+    suse)   log "  - Fcitx5 is still installed: sudo zypper remove fcitx5" ;;
+    *)      log "  - Fcitx5 packages remain installed" ;;
 esac
-echo "  - Logout/login to fully apply changes"
-if [ -f "$ENV_FILE" ]; then
-    echo "  - Environment config kept at: $ENV_FILE"
-fi
-echo
+log "  - Logout/login to fully apply changes."
+log

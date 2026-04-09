@@ -1,7 +1,8 @@
 [Addon]
-Name=vimotion-module
+Name=vimotion
 Category=Module
 Library=vimotion-module
 Type=SharedLibrary
 OnDemand=False
+Configurable=True
 Version=@PROJECT_VERSION@

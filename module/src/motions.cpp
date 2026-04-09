@@ -1,7 +1,7 @@
 #include "motions.h"
 #include <fcitx-utils/keysymgen.h>
 
-namespace vimotion {
+namespace vimotion_module {
 
 const std::vector<MotionMapping> &getMotionMappings() {
     static const std::vector<MotionMapping> mappings = {
@@ -15,7 +15,7 @@ const std::vector<MotionMapping> &getMotionMappings() {
         {FcitxKey_k, fcitx::Key(FcitxKey_Up),
                      fcitx::Key(FcitxKey_Up, fcitx::KeyState::Shift)},
 
-        // Wort-Navigation (e wird separat in vimotion.cpp behandelt)
+        // Wort-Navigation (e wird separat behandelt)
         {FcitxKey_w, fcitx::Key(FcitxKey_Right, fcitx::KeyState::Ctrl),
                      fcitx::Key(FcitxKey_Right, fcitx::KeyState::Ctrl_Shift)},
         {FcitxKey_b, fcitx::Key(FcitxKey_Left, fcitx::KeyState::Ctrl),
@@ -27,11 +27,11 @@ const std::vector<MotionMapping> &getMotionMappings() {
         {FcitxKey_dollar, fcitx::Key(FcitxKey_End),
                           fcitx::Key(FcitxKey_End, fcitx::KeyState::Shift)},
 
-        // Dokument-Navigation (gg wird separat in vimotion.cpp behandelt)
+        // Dokument-Navigation (gg wird separat behandelt)
         {FcitxKey_G, fcitx::Key(FcitxKey_End, fcitx::KeyState::Ctrl),
                      fcitx::Key(FcitxKey_End, fcitx::KeyState::Ctrl_Shift)},
     };
     return mappings;
 }
 
-} // namespace vimotion
+} // namespace vimotion_module
