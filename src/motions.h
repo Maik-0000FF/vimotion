@@ -4,7 +4,7 @@
 #include <vector>
 #include <fcitx-utils/key.h>
 
-namespace vimotion_module {
+namespace vimotion {
 
 struct MotionMapping {
     fcitx::KeySym vimKey;
@@ -14,6 +14,6 @@ struct MotionMapping {
 
 const std::vector<MotionMapping> &getMotionMappings();
 
-} // namespace vimotion_module
+} // namespace vimotion
 
 #endif

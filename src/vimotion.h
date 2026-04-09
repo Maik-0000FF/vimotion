@@ -1,5 +1,5 @@
-#ifndef VIMOTION_MODULE_H
-#define VIMOTION_MODULE_H
+#ifndef VIMOTION_H
+#define VIMOTION_H
 
 #include <memory>
 #include <string>
@@ -17,7 +17,7 @@
 #include <fcitx/inputcontextproperty.h>
 #include <fcitx/instance.h>
 
-namespace vimotion_module {
+namespace vimotion {
 
 FCITX_CONFIG_ENUM(AppFilterMode, None, Blacklist, Whitelist);
 
@@ -57,7 +57,7 @@ FCITX_CONFIGURATION(
 );
 
 FCITX_CONFIGURATION(
-    VimotionModuleConfig,
+    VimotionConfig,
     fcitx::Option<GeneralConfig> general{this, "General", "General"};
     fcitx::Option<AppFilterConfig> appFilter{this, "AppFilter", "App Filter"};
     fcitx::Option<MappingsConfig> mappings{this, "Mappings", "Key Mappings"};
@@ -86,9 +86,9 @@ struct VimState : public fcitx::InputContextProperty {
     std::unique_ptr<fcitx::EventSourceTime> seqTimer;
 };
 
-class VimotionModule : public fcitx::AddonInstance {
+class Vimotion : public fcitx::AddonInstance {
 public:
-    explicit VimotionModule(fcitx::Instance *instance);
+    explicit Vimotion(fcitx::Instance *instance);
 
     const fcitx::Configuration *getConfig() const override { return &config_; }
     void setConfig(const fcitx::RawConfig &rawConfig) override;
@@ -135,7 +135,7 @@ private:
     std::unique_ptr<fcitx::HandlerTableEntry<fcitx::EventHandler>>
         focusOutHandler_;
 
-    VimotionModuleConfig config_;
+    VimotionConfig config_;
 
     // Cached values from config_
     bool enabledByDefault_ = false;
@@ -148,10 +148,10 @@ private:
     std::vector<InsertMapping> insertMappings_;
 };
 
-class VimotionModuleFactory : public fcitx::AddonFactory {
+class VimotionFactory : public fcitx::AddonFactory {
     fcitx::AddonInstance *create(fcitx::AddonManager *manager) override;
 };
 
-} // namespace vimotion_module
+} // namespace vimotion
 
 #endif

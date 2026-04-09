@@ -215,42 +215,51 @@ else
 fi
 
 #-----------------------------------------------------------------------
-# Stale installation detection (BEFORE building, so we can warn early)
+# Installation candidates (where the freshly built file may end up)
+# and legacy paths from older versions that should be cleaned up.
 #-----------------------------------------------------------------------
-STALE_LIB_CANDIDATES=(
-    /usr/lib/fcitx5/vimotion.so
-    /usr/lib/fcitx5/vimotion-module.so
-    /usr/lib64/fcitx5/vimotion.so
-    /usr/lib64/fcitx5/vimotion-module.so
-    /usr/local/lib/fcitx5/vimotion.so
-    /usr/local/lib/fcitx5/vimotion-module.so
-    /usr/local/lib64/fcitx5/vimotion.so
-    /usr/local/lib64/fcitx5/vimotion-module.so
+LIB_DIRS=(
+    /usr/lib/fcitx5
+    /usr/lib64/fcitx5
+    /usr/local/lib/fcitx5
+    /usr/local/lib64/fcitx5
 )
-STALE_DATA_CANDIDATES=(
-    /usr/share/fcitx5/addon/vimotion.conf
-    /usr/share/fcitx5/addon/vimotion-module.conf
-    /usr/share/fcitx5/inputmethod/vimotion-im.conf
-    /usr/local/share/fcitx5/addon/vimotion.conf
-    /usr/local/share/fcitx5/addon/vimotion-module.conf
-    /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
-)
-
 if [[ "${DISTRO}" == "debian" ]]; then
-    STALE_LIB_CANDIDATES+=(
-        /usr/lib/x86_64-linux-gnu/fcitx5/vimotion.so
-        /usr/lib/x86_64-linux-gnu/fcitx5/vimotion-module.so
-        /usr/lib/aarch64-linux-gnu/fcitx5/vimotion.so
-        /usr/lib/aarch64-linux-gnu/fcitx5/vimotion-module.so
-        /usr/local/lib/x86_64-linux-gnu/fcitx5/vimotion.so
-        /usr/local/lib/x86_64-linux-gnu/fcitx5/vimotion-module.so
-        /usr/local/lib/aarch64-linux-gnu/fcitx5/vimotion.so
-        /usr/local/lib/aarch64-linux-gnu/fcitx5/vimotion-module.so
+    LIB_DIRS+=(
+        /usr/lib/x86_64-linux-gnu/fcitx5
+        /usr/lib/aarch64-linux-gnu/fcitx5
+        /usr/local/lib/x86_64-linux-gnu/fcitx5
+        /usr/local/lib/aarch64-linux-gnu/fcitx5
     )
 fi
 
+INSTALL_LIB_CANDIDATES=()
+LEGACY_LIB_CANDIDATES=()
+for d in "${LIB_DIRS[@]}"; do
+    INSTALL_LIB_CANDIDATES+=( "${d}/vimotion.so" )
+    LEGACY_LIB_CANDIDATES+=( "${d}/vimotion-module.so" )
+done
+
+LEGACY_DATA_CANDIDATES=(
+    /usr/share/fcitx5/addon/vimotion-module.conf
+    /usr/share/fcitx5/inputmethod/vimotion-im.conf
+    /usr/local/share/fcitx5/addon/vimotion-module.conf
+    /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
+)
+# vimotion.conf is also a current install target — only stale if it
+# already exists from a previous install of THIS version, in which case
+# `cmake --install` will overwrite it cleanly. We still include it so
+# users can opt to wipe it on reinstall.
+CURRENT_DATA_CANDIDATES=(
+    /usr/share/fcitx5/addon/vimotion.conf
+    /usr/local/share/fcitx5/addon/vimotion.conf
+)
+
 STALE_FILES=()
-for f in "${STALE_LIB_CANDIDATES[@]}" "${STALE_DATA_CANDIDATES[@]}"; do
+for f in "${INSTALL_LIB_CANDIDATES[@]}" \
+         "${LEGACY_LIB_CANDIDATES[@]}" \
+         "${LEGACY_DATA_CANDIDATES[@]}" \
+         "${CURRENT_DATA_CANDIDATES[@]}"; do
     [[ -f "${f}" ]] && STALE_FILES+=("${f}")
 done
 
@@ -309,11 +318,11 @@ log
 # Verify install actually placed the .so somewhere fcitx will find it
 #-----------------------------------------------------------------------
 INSTALLED=()
-for f in "${STALE_LIB_CANDIDATES[@]}"; do
+for f in "${INSTALL_LIB_CANDIDATES[@]}"; do
     [[ -f "${f}" ]] && INSTALLED+=("${f}")
 done
 if (( ${#INSTALLED[@]} == 0 )); then
-    die "Install completed but vimotion-module.so was not found in any known fcitx5 addon directory."
+    die "Install completed but vimotion.so was not found in any known fcitx5 addon directory."
 fi
 ok "Installed library:"
 for f in "${INSTALLED[@]}"; do

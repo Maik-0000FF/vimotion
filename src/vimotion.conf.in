@@ -1,7 +1,7 @@
 [Addon]
 Name=vimotion
 Category=Module
-Library=vimotion-module
+Library=vimotion
 Type=SharedLibrary
 OnDemand=False
 Configurable=True

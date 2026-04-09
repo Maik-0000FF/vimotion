@@ -1,4 +1,4 @@
-#include "vimotion_module.h"
+#include "vimotion.h"
 #include "motions.h"
 #include <algorithm>
 #include <cstdint>
@@ -10,11 +10,11 @@
 #include <fcitx/text.h>
 #include <fcitx/userinterface.h>
 
-namespace vimotion_module {
+namespace vimotion {
 
 namespace {
 
-constexpr const char *kConfigFile = "conf/vimotion-module.conf";
+constexpr const char *kConfigFile = "conf/vimotion.conf";
 
 // Trim leading/trailing whitespace
 std::string trim(const std::string &s) {
@@ -34,7 +34,7 @@ std::string trim(const std::string &s) {
 
 } // namespace
 
-VimotionModule::VimotionModule(fcitx::Instance *instance)
+Vimotion::Vimotion(fcitx::Instance *instance)
     : instance_(instance) {
     instance_->inputContextManager().registerProperty("vimotion-state",
                                                       &factory_);
@@ -74,22 +74,22 @@ VimotionModule::VimotionModule(fcitx::Instance *instance)
         });
 }
 
-void VimotionModule::loadConfigFromFile() {
+void Vimotion::loadConfigFromFile() {
     fcitx::readAsIni(config_, kConfigFile);
     applyConfig();
 }
 
-void VimotionModule::setConfig(const fcitx::RawConfig &rawConfig) {
+void Vimotion::setConfig(const fcitx::RawConfig &rawConfig) {
     config_.load(rawConfig);
     fcitx::safeSaveAsIni(config_, kConfigFile);
     applyConfig();
 }
 
-void VimotionModule::reloadConfig() {
+void Vimotion::reloadConfig() {
     loadConfigFromFile();
 }
 
-void VimotionModule::applyConfig() {
+void Vimotion::applyConfig() {
     enabledByDefault_ = *config_.general->enabledByDefault;
     toggleKeys_ = *config_.general->toggleKey;
     filterMode_ = *config_.appFilter->mode;
@@ -99,7 +99,7 @@ void VimotionModule::applyConfig() {
     parseInsertMappings();
 }
 
-void VimotionModule::parseInsertMappings() {
+void Vimotion::parseInsertMappings() {
     insertMappings_.clear();
     for (const auto &line : *config_.mappings->insertMap) {
         auto trimmed = trim(line);
@@ -130,7 +130,7 @@ void VimotionModule::parseInsertMappings() {
     }
 }
 
-void VimotionModule::handleKeyEvent(fcitx::Event &event) {
+void Vimotion::handleKeyEvent(fcitx::Event &event) {
     auto &keyEvent = static_cast<fcitx::KeyEvent &>(event);
 
     if (keyEvent.isRelease()) {
@@ -178,17 +178,17 @@ void VimotionModule::handleKeyEvent(fcitx::Event &event) {
     }
 }
 
-bool VimotionModule::isPrintableAscii(fcitx::KeySym sym) const {
+bool Vimotion::isPrintableAscii(fcitx::KeySym sym) const {
     return sym >= 0x20 && sym <= 0x7E;
 }
 
-void VimotionModule::clearSeqBuffer(VimState *state) {
+void Vimotion::clearSeqBuffer(VimState *state) {
     state->seqText.clear();
     state->seqKeys.clear();
     state->seqTimer.reset();
 }
 
-void VimotionModule::flushSeqBuffer(VimState *state, fcitx::InputContext *ic) {
+void Vimotion::flushSeqBuffer(VimState *state, fcitx::InputContext *ic) {
     auto keys = std::move(state->seqKeys);
     state->seqText.clear();
     state->seqTimer.reset();
@@ -197,7 +197,7 @@ void VimotionModule::flushSeqBuffer(VimState *state, fcitx::InputContext *ic) {
     }
 }
 
-void VimotionModule::scheduleSeqTimeout(VimState *state,
+void Vimotion::scheduleSeqTimeout(VimState *state,
                                         fcitx::InputContext *ic) {
     auto &loop = instance_->eventLoop();
     uint64_t now = fcitx::now(CLOCK_MONOTONIC);
@@ -213,7 +213,7 @@ void VimotionModule::scheduleSeqTimeout(VimState *state,
         });
 }
 
-void VimotionModule::handleInsertMode(VimState *state,
+void Vimotion::handleInsertMode(VimState *state,
                                       fcitx::KeyEvent &event) {
     auto *ic = event.inputContext();
 
@@ -297,7 +297,7 @@ void VimotionModule::handleInsertMode(VimState *state,
     // Let key pass through to the underlying IM / application.
 }
 
-void VimotionModule::handleNormalMode(VimState *state,
+void Vimotion::handleNormalMode(VimState *state,
                                       fcitx::KeyEvent &event) {
     auto key = event.key();
     auto *ic = event.inputContext();
@@ -497,7 +497,7 @@ void VimotionModule::handleNormalMode(VimState *state,
     }
 }
 
-void VimotionModule::handleOperatorPending(VimState *state,
+void Vimotion::handleOperatorPending(VimState *state,
                                            fcitx::KeyEvent &event) {
     auto key = event.key();
     auto *ic = event.inputContext();
@@ -609,14 +609,14 @@ void VimotionModule::handleOperatorPending(VimState *state,
     event.filterAndAccept();
 }
 
-void VimotionModule::executeMotion(fcitx::InputContext *ic, fcitx::Key motion,
+void Vimotion::executeMotion(fcitx::InputContext *ic, fcitx::Key motion,
                                    int count) {
     for (int i = 0; i < count; ++i) {
         ic->forwardKey(motion);
     }
 }
 
-void VimotionModule::executeMotionE(fcitx::InputContext *ic, int count,
+void Vimotion::executeMotionE(fcitx::InputContext *ic, int count,
                                     bool withShift) {
     auto ctrlRight = withShift
         ? fcitx::Key(FcitxKey_Right, fcitx::KeyState::Ctrl_Shift)
@@ -631,7 +631,7 @@ void VimotionModule::executeMotionE(fcitx::InputContext *ic, int count,
     ic->forwardKey(left);
 }
 
-void VimotionModule::executeOperator(fcitx::InputContext *ic, VimState *state,
+void Vimotion::executeOperator(fcitx::InputContext *ic, VimState *state,
                                      Operator op, fcitx::Key shiftMotion,
                                      int count) {
     for (int i = 0; i < count; ++i) {
@@ -656,7 +656,7 @@ void VimotionModule::executeOperator(fcitx::InputContext *ic, VimState *state,
     }
 }
 
-void VimotionModule::executeLineOperator(fcitx::InputContext *ic,
+void Vimotion::executeLineOperator(fcitx::InputContext *ic,
                                          VimState *state, Operator op,
                                          int count) {
     ic->forwardKey(fcitx::Key(FcitxKey_Home));
@@ -683,7 +683,7 @@ void VimotionModule::executeLineOperator(fcitx::InputContext *ic,
     }
 }
 
-void VimotionModule::switchMode(VimState *state, Mode newMode,
+void Vimotion::switchMode(VimState *state, Mode newMode,
                                 fcitx::InputContext *ic) {
     state->mode = newMode;
     if (newMode != Mode::Insert) {
@@ -693,7 +693,7 @@ void VimotionModule::switchMode(VimState *state, Mode newMode,
     updateModeDisplay(state, ic);
 }
 
-void VimotionModule::updateModeDisplay(VimState *state,
+void Vimotion::updateModeDisplay(VimState *state,
                                        fcitx::InputContext *ic) {
     auto &inputPanel = ic->inputPanel();
     inputPanel.reset();
@@ -736,14 +736,14 @@ void VimotionModule::updateModeDisplay(VimState *state,
     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 }
 
-void VimotionModule::resetState(VimState *state) {
+void Vimotion::resetState(VimState *state) {
     state->pendingOp = Operator::None;
     state->count = 0;
     state->countActive = false;
     state->pendingG = false;
 }
 
-bool VimotionModule::isFiltered(fcitx::InputContext *ic) const {
+bool Vimotion::isFiltered(fcitx::InputContext *ic) const {
     if (filterMode_ == AppFilterMode::None) return false;
 
     const std::string &program = ic->program();
@@ -766,7 +766,7 @@ bool VimotionModule::isFiltered(fcitx::InputContext *ic) const {
     return true;
 }
 
-bool VimotionModule::isTerminal(fcitx::InputContext *ic) const {
+bool Vimotion::isTerminal(fcitx::InputContext *ic) const {
     const auto &program = ic->program();
     static const std::vector<std::string> terminals = {
         "wezterm", "kitty", "alacritty", "ghostty", "xterm",
@@ -781,14 +781,14 @@ bool VimotionModule::isTerminal(fcitx::InputContext *ic) const {
     return false;
 }
 
-fcitx::Key VimotionModule::copyKey(fcitx::InputContext *ic) const {
+fcitx::Key Vimotion::copyKey(fcitx::InputContext *ic) const {
     if (isTerminal(ic)) {
         return fcitx::Key(FcitxKey_c, fcitx::KeyState::Ctrl_Shift);
     }
     return fcitx::Key(FcitxKey_c, fcitx::KeyState::Ctrl);
 }
 
-fcitx::Key VimotionModule::pasteKey(fcitx::InputContext *ic) const {
+fcitx::Key Vimotion::pasteKey(fcitx::InputContext *ic) const {
     if (isTerminal(ic)) {
         return fcitx::Key(FcitxKey_v, fcitx::KeyState::Ctrl_Shift);
     }
@@ -796,10 +796,10 @@ fcitx::Key VimotionModule::pasteKey(fcitx::InputContext *ic) const {
 }
 
 fcitx::AddonInstance *
-VimotionModuleFactory::create(fcitx::AddonManager *manager) {
-    return new VimotionModule(manager->instance());
+VimotionFactory::create(fcitx::AddonManager *manager) {
+    return new Vimotion(manager->instance());
 }
 
-} // namespace vimotion_module
+} // namespace vimotion
 
-FCITX_ADDON_FACTORY(vimotion_module::VimotionModuleFactory);
+FCITX_ADDON_FACTORY(vimotion::VimotionFactory);

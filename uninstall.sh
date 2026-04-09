@@ -111,6 +111,7 @@ DATA_FILES=(
 
 FOUND_FILES=()
 for lib_path in "${LIB_PATHS[@]}"; do
+    # Current name + legacy names from earlier versions
     for so in vimotion.so vimotion-module.so; do
         [[ -f "${lib_path}/${so}" ]] && FOUND_FILES+=("${lib_path}/${so}")
     done
@@ -121,11 +122,16 @@ done
 
 # Per-user config (safe to nuke without sudo)
 USER_CONFIG_FILES=(
+    "${HOME}/.config/fcitx5/conf/vimotion.conf"
     "${HOME}/.config/fcitx5/conf/vimotion-module.conf"
 )
 
-if (( ${#FOUND_FILES[@]} == 0 )) \
-   && [[ ! -f "${USER_CONFIG_FILES[0]}" ]]; then
+USER_CONFIG_PRESENT=0
+for f in "${USER_CONFIG_FILES[@]}"; do
+    [[ -f "${f}" ]] && USER_CONFIG_PRESENT=1
+done
+
+if (( ${#FOUND_FILES[@]} == 0 && USER_CONFIG_PRESENT == 0 )); then
     warn "No installation found. Nothing to uninstall."
     exit 0
 fi
@@ -137,9 +143,11 @@ if (( ${#FOUND_FILES[@]} > 0 )); then
     done
     log
 fi
-if [[ -f "${USER_CONFIG_FILES[0]}" ]]; then
+if (( USER_CONFIG_PRESENT == 1 )); then
     warn "Found user config:"
-    log "  - ${USER_CONFIG_FILES[0]}"
+    for f in "${USER_CONFIG_FILES[@]}"; do
+        [[ -f "${f}" ]] && log "  - ${f}"
+    done
     log
 fi
 

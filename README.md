@@ -22,7 +22,7 @@ vimotion is a [Fcitx5](https://github.com/fcitx/fcitx5) module that brings Vim-l
 
 ## Architecture
 
-vimotion ships as a single Fcitx5 **module** (`vimotion-module.so`). The module runs in the `PreInputMethod` phase and can be toggled per input context, which means:
+vimotion ships as a single Fcitx5 **module** (`vimotion.so`). The module runs in the `PreInputMethod` phase and can be toggled per input context, which means:
 
 - It runs alongside any other Fcitx5 input method (no need to switch IM).
 - Each window has its own mode state.
@@ -68,7 +68,7 @@ sudo cmake --install build
 
 ## Configuration
 
-Open `fcitx5-configtool` → **Addons** → **vimotion** (or edit `~/.config/fcitx5/conf/vimotion-module.conf` directly).
+Open `fcitx5-configtool` → **Addons** → **vimotion** (or edit `~/.config/fcitx5/conf/vimotion.conf` directly).
 
 | Section | Key | Default | Description |
 |---|---|---|---|

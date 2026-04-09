@@ -1,7 +1,7 @@
 #include "motions.h"
 #include <fcitx-utils/keysymgen.h>
 
-namespace vimotion_module {
+namespace vimotion {
 
 const std::vector<MotionMapping> &getMotionMappings() {
     static const std::vector<MotionMapping> mappings = {
@@ -34,4 +34,4 @@ const std::vector<MotionMapping> &getMotionMappings() {
     return mappings;
 }
 
-} // namespace vimotion_module
+} // namespace vimotion

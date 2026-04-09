@@ -133,9 +133,9 @@ static void runTests(Instance *instance) {
         return;
     }
 
-    auto *vimod = instance->addonManager().addon("vimotion-module", true);
+    auto *vimod = instance->addonManager().addon("vimotion", true);
     if (!vimod) {
-        std::cerr << "FATAL: vimotion-module nicht geladen\n";
+        std::cerr << "FATAL: vimotion nicht geladen\n";
         testsFailed++;
         instance->exit();
         return;
@@ -653,10 +653,10 @@ static void runTests(Instance *instance) {
 int main() {
     setupTestingEnvironment(
         TESTING_BINARY_DIR,
-        {"module"},
+        {"src"},
         {"tests"});
 
-    char arg0[] = "test_vimotion_module";
+    char arg0[] = "test_vimotion";
     char *argv[] = {arg0};
     Instance instance(1, argv);
     instance.addonManager().registerDefaultLoader(nullptr);
