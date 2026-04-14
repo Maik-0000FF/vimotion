@@ -67,7 +67,7 @@ if [[ ${EUID} -eq 0 ]]; then
     die "Do not run this script as root. Sudo will be requested when needed."
 fi
 
-require_cmd /usr/bin/uname /usr/bin/tee
+require_cmd /usr/bin/uname /usr/bin/tee /usr/bin/realpath
 # sudo is required for installing files into system directories
 require_cmd sudo
 
@@ -232,6 +232,22 @@ if [[ "${DISTRO}" == "debian" ]]; then
         /usr/local/lib/aarch64-linux-gnu/fcitx5
     )
 fi
+
+# On distros where /usr/lib64 is a symlink to /usr/lib (Arch and friends),
+# both paths resolve to the same inode and would otherwise show up twice
+# in every "found files" / "installed library" listing. Canonicalize via
+# realpath and drop duplicates, keeping the first occurrence.
+_canonical_lib_dirs=()
+for d in "${LIB_DIRS[@]}"; do
+    real="$(/usr/bin/realpath -m -- "${d}")"
+    dup=0
+    for s in "${_canonical_lib_dirs[@]}"; do
+        [[ "${s}" == "${real}" ]] && { dup=1; break; }
+    done
+    (( dup == 0 )) && _canonical_lib_dirs+=("${real}")
+done
+LIB_DIRS=("${_canonical_lib_dirs[@]}")
+unset _canonical_lib_dirs real dup s
 
 INSTALL_LIB_CANDIDATES=()
 LEGACY_LIB_CANDIDATES=()

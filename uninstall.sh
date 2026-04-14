@@ -100,6 +100,20 @@ LIB_PATHS=(
     /usr/local/lib/aarch64-linux-gnu/fcitx5
 )
 
+# Canonicalize and dedupe so /usr/lib64 -> /usr/lib symlinks don't
+# produce phantom duplicates in listings.
+_canonical_lib_paths=()
+for d in "${LIB_PATHS[@]}"; do
+    real="$(/usr/bin/realpath -m -- "${d}")"
+    dup=0
+    for s in "${_canonical_lib_paths[@]}"; do
+        [[ "${s}" == "${real}" ]] && { dup=1; break; }
+    done
+    (( dup == 0 )) && _canonical_lib_paths+=("${real}")
+done
+LIB_PATHS=("${_canonical_lib_paths[@]}")
+unset _canonical_lib_paths real dup s
+
 DATA_FILES=(
     /usr/share/fcitx5/addon/vimotion.conf
     /usr/share/fcitx5/addon/vimotion-module.conf
