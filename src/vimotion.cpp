@@ -96,11 +96,19 @@ void Vimotion::applyConfig() {
     blacklist_ = *config_.appFilter->blacklist;
     whitelist_ = *config_.appFilter->whitelist;
     seqTimeoutMs_ = *config_.mappings->timeoutMs;
+    countPrefix_ = *config_.features->countPrefix;
+    deleteChar_ = *config_.features->deleteChar;
+    deleteOp_ = *config_.features->deleteOp;
+    yankPaste_ = *config_.features->yankPaste;
+    changeOp_ = *config_.features->changeOp;
+    undoRedo_ = *config_.features->undoRedo;
+    insertMap_ = *config_.features->insertMap;
     parseInsertMappings();
 }
 
 void Vimotion::parseInsertMappings() {
     insertMappings_.clear();
+    if (!insertMap_) return;
     for (const auto &line : *config_.mappings->insertMap) {
         auto trimmed = trim(line);
         if (trimmed.empty() || trimmed[0] == '#') continue;
@@ -303,9 +311,11 @@ void Vimotion::handleNormalMode(VimState *state,
     auto *ic = event.inputContext();
 
     // Ctrl+R: Redo
-    if (key.check(FcitxKey_r, fcitx::KeyState::Ctrl) ||
-        key.check(FcitxKey_R, fcitx::KeyState::Ctrl)) {
-        int effectiveCount = state->countActive ? state->count : 1;
+    if (undoRedo_ &&
+        (key.check(FcitxKey_r, fcitx::KeyState::Ctrl) ||
+         key.check(FcitxKey_R, fcitx::KeyState::Ctrl))) {
+        int effectiveCount =
+            (countPrefix_ && state->countActive) ? state->count : 1;
         for (int i = 0; i < effectiveCount; ++i) {
             ic->forwardKey(fcitx::Key(FcitxKey_y, fcitx::KeyState::Ctrl));
         }
@@ -321,7 +331,8 @@ void Vimotion::handleNormalMode(VimState *state,
         return;
     }
 
-    int effectiveCount = state->countActive ? state->count : 1;
+    int effectiveCount =
+        (countPrefix_ && state->countActive) ? state->count : 1;
 
     // Pending-g Sequenz: gg -> Dokumentanfang
     if (state->pendingG) {
@@ -365,7 +376,7 @@ void Vimotion::handleNormalMode(VimState *state,
         }
     }
 
-    if (key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
+    if (countPrefix_ && key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
         int digit = key.sym() - FcitxKey_0;
         if (state->countActive) {
             state->count = state->count * 10 + digit;
@@ -423,7 +434,7 @@ void Vimotion::handleNormalMode(VimState *state,
         return;
     }
 
-    if (key.check(FcitxKey_x)) {
+    if (deleteChar_ && key.check(FcitxKey_x)) {
         for (int i = 0; i < effectiveCount; ++i) {
             ic->forwardKey(fcitx::Key(FcitxKey_Delete));
         }
@@ -431,7 +442,7 @@ void Vimotion::handleNormalMode(VimState *state,
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_X)) {
+    if (deleteChar_ && key.check(FcitxKey_X)) {
         for (int i = 0; i < effectiveCount; ++i) {
             ic->forwardKey(fcitx::Key(FcitxKey_BackSpace));
         }
@@ -439,7 +450,7 @@ void Vimotion::handleNormalMode(VimState *state,
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_p)) {
+    if (yankPaste_ && key.check(FcitxKey_p)) {
         ic->forwardKey(fcitx::Key(FcitxKey_End));
         ic->forwardKey(fcitx::Key(FcitxKey_Return));
         ic->forwardKey(pasteKey(ic));
@@ -447,7 +458,7 @@ void Vimotion::handleNormalMode(VimState *state,
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_P)) {
+    if (yankPaste_ && key.check(FcitxKey_P)) {
         ic->forwardKey(fcitx::Key(FcitxKey_Home));
         ic->forwardKey(fcitx::Key(FcitxKey_Return));
         ic->forwardKey(fcitx::Key(FcitxKey_Up));
@@ -456,7 +467,7 @@ void Vimotion::handleNormalMode(VimState *state,
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_u)) {
+    if (undoRedo_ && key.check(FcitxKey_u)) {
         for (int i = 0; i < effectiveCount; ++i) {
             ic->forwardKey(fcitx::Key(FcitxKey_z, fcitx::KeyState::Ctrl));
         }
@@ -465,19 +476,19 @@ void Vimotion::handleNormalMode(VimState *state,
         return;
     }
 
-    if (key.check(FcitxKey_d)) {
+    if (deleteOp_ && key.check(FcitxKey_d)) {
         state->pendingOp = Operator::Delete;
         switchMode(state, Mode::OperatorPending, ic);
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_y)) {
+    if (yankPaste_ && key.check(FcitxKey_y)) {
         state->pendingOp = Operator::Yank;
         switchMode(state, Mode::OperatorPending, ic);
         event.filterAndAccept();
         return;
     }
-    if (key.check(FcitxKey_c)) {
+    if (changeOp_ && key.check(FcitxKey_c)) {
         state->pendingOp = Operator::Change;
         switchMode(state, Mode::OperatorPending, ic);
         event.filterAndAccept();
@@ -509,9 +520,10 @@ void Vimotion::handleOperatorPending(VimState *state,
         return;
     }
 
-    int effectiveCount = state->countActive ? state->count : 1;
+    int effectiveCount =
+        (countPrefix_ && state->countActive) ? state->count : 1;
 
-    if (key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
+    if (countPrefix_ && key.sym() >= FcitxKey_1 && key.sym() <= FcitxKey_9) {
         int digit = key.sym() - FcitxKey_0;
         if (state->countActive) {
             state->count = state->count * 10 + digit;

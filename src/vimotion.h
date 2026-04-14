@@ -56,10 +56,33 @@ FCITX_CONFIGURATION(
         {std::string("jk=Escape")}};
 );
 
+// Movements (h j k l w b e 0 $ gg G), insert-mode entry (i a I A o O),
+// Escape and the module toggle are always active. Everything below can
+// be switched off independently so the addon can be used as a pure
+// movement overlay if desired.
+FCITX_CONFIGURATION(
+    FeaturesConfig,
+    fcitx::Option<bool> countPrefix{this, "CountPrefix",
+        "Count prefix (e.g. 3j, 5w)", true};
+    fcitx::Option<bool> deleteChar{this, "DeleteChar",
+        "Single-char delete (x, X)", true};
+    fcitx::Option<bool> deleteOp{this, "Delete",
+        "Delete operator (d, dd, dw, ...)", true};
+    fcitx::Option<bool> yankPaste{this, "YankPaste",
+        "Yank / paste (y, yy, p, P)", true};
+    fcitx::Option<bool> changeOp{this, "Change",
+        "Change operator (c, cc, cw, ...)", true};
+    fcitx::Option<bool> undoRedo{this, "UndoRedo",
+        "Undo / redo (u, Ctrl+R)", true};
+    fcitx::Option<bool> insertMap{this, "InsertMap",
+        "Insert-mode sequence mappings", true};
+);
+
 FCITX_CONFIGURATION(
     VimotionConfig,
     fcitx::Option<GeneralConfig> general{this, "General", "General"};
     fcitx::Option<AppFilterConfig> appFilter{this, "AppFilter", "App Filter"};
+    fcitx::Option<FeaturesConfig> features{this, "Features", "Features"};
     fcitx::Option<MappingsConfig> mappings{this, "Mappings", "Key Mappings"};
 );
 
@@ -146,6 +169,15 @@ private:
     std::vector<std::string> whitelist_;
     int seqTimeoutMs_ = 200;
     std::vector<InsertMapping> insertMappings_;
+
+    // Feature toggles (see FeaturesConfig)
+    bool countPrefix_ = true;
+    bool deleteChar_ = true;
+    bool deleteOp_ = true;
+    bool yankPaste_ = true;
+    bool changeOp_ = true;
+    bool undoRedo_ = true;
+    bool insertMap_ = true;
 };
 
 class VimotionFactory : public fcitx::AddonFactory {

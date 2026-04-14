@@ -6,6 +6,7 @@
 //   3- Per-IC State, Default Blacklist
 //   4- Config-Roundtrip: custom Toggle Key, EnabledByDefault, Whitelist
 //   5- Insert-Mode Mappings (jk -> Escape) inkl. Flush-Verhalten
+//   6- Feature toggles: all off (movements baseline) und selektiv
 
 #include <cassert>
 #include <iostream>
@@ -633,6 +634,179 @@ static void runTests(Instance *instance) {
         EXPECT_NO_FORWARD();
 
         frontend->call<ITestFrontend::destroyInputContext>(uuidM);
+    }
+
+    // ====== Config: Feature Toggles ======
+    std::cerr << "\n=== Config: Feature Toggles (all off) ===\n";
+
+    {
+        RawConfig cfg;
+        cfg.setValueByPath("General/EnabledByDefault", "False");
+        cfg.setValueByPath("General/ToggleKey/0", "Control+Escape");
+        cfg.setValueByPath("AppFilter/Mode", "None");
+        cfg.setValueByPath("Features/CountPrefix", "False");
+        cfg.setValueByPath("Features/DeleteChar", "False");
+        cfg.setValueByPath("Features/Delete", "False");
+        cfg.setValueByPath("Features/YankPaste", "False");
+        cfg.setValueByPath("Features/Change", "False");
+        cfg.setValueByPath("Features/UndoRedo", "False");
+        cfg.setValueByPath("Features/InsertMap", "False");
+        cfg.setValueByPath("Mappings/TimeoutMs", "200");
+        cfg.setValueByPath("Mappings/InsertMap/0", "jk=Escape");
+        vimod->setConfig(cfg);
+
+        auto uuidF = frontend->call<ITestFrontend::createInputContext>("");
+        auto *icF = instance->inputContextManager().findByUUID(uuidF);
+        if (icF) {
+            icF->focusIn();
+        }
+        sendKey(frontend, uuidF, FcitxKey_Escape, KeyState::Ctrl);
+
+        TEST("Baseline: h -> Left (Bewegungen immer an)");
+        sendKey(frontend, uuidF, FcitxKey_h);
+        EXPECT_FORWARDED(FcitxKey_Left);
+
+        TEST("Baseline: w -> Ctrl+Right (Bewegungen immer an)");
+        sendKey(frontend, uuidF, FcitxKey_w);
+        EXPECT_FORWARDED(FcitxKey_Right);
+
+        TEST("Baseline: gg -> Ctrl+Home (Bewegungen immer an)");
+        forwarded.clear();
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_g), false);
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_g), false);
+        EXPECT_FORWARDED(FcitxKey_Home);
+
+        TEST("Baseline: i -> Insert (Insert-Entry immer an)");
+        sendKey(frontend, uuidF, FcitxKey_i);
+        EXPECT_NO_FORWARD();
+        sendKey(frontend, uuidF, FcitxKey_Escape);
+
+        // Im Normal Mode werden printable ASCII-Tasten generell konsumiert
+        // (sonst wuerde man Text tippen). "Feature off" heisst: konsumiert,
+        // aber ohne Forward-Effekt.
+        TEST("CountPrefix off: 3j -> nur 1x Down (kein Count)");
+        forwarded.clear();
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_3), false);
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_j), false);
+        EXPECT_FORWARDED_COUNT(1);
+
+        TEST("DeleteChar off: x -> kein Delete-Forward");
+        sendKey(frontend, uuidF, FcitxKey_x);
+        EXPECT_NO_FORWARD();
+
+        TEST("DeleteChar off: X -> kein BackSpace-Forward");
+        sendKey(frontend, uuidF, FcitxKey_X);
+        EXPECT_NO_FORWARD();
+
+        TEST("Delete off: d + w -> kein Forward");
+        forwarded.clear();
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_d), false);
+        // 'w' ist eine Bewegung und bleibt aktiv, also EIN Forward (Right)
+        frontend->call<ITestFrontend::keyEvent>(uuidF, Key(FcitxKey_w), false);
+        EXPECT_FORWARDED_COUNT(1);
+
+        TEST("YankPaste off: y -> kein Forward");
+        sendKey(frontend, uuidF, FcitxKey_y);
+        EXPECT_NO_FORWARD();
+
+        TEST("YankPaste off: p -> kein Paste-Forward");
+        sendKey(frontend, uuidF, FcitxKey_p);
+        EXPECT_NO_FORWARD();
+
+        TEST("YankPaste off: P -> kein Paste-Forward");
+        sendKey(frontend, uuidF, FcitxKey_P);
+        EXPECT_NO_FORWARD();
+
+        TEST("Change off: c -> kein Forward");
+        sendKey(frontend, uuidF, FcitxKey_c);
+        EXPECT_NO_FORWARD();
+
+        TEST("UndoRedo off: u -> kein Ctrl+Z-Forward");
+        sendKey(frontend, uuidF, FcitxKey_u);
+        EXPECT_NO_FORWARD();
+
+        TEST("UndoRedo off: Ctrl+R geht durch (kein Ctrl+Y-Forward)");
+        EXPECT_FALSE(sendKeyAccepted(frontend, uuidF,
+                                     FcitxKey_r, KeyState::Ctrl));
+
+        // InsertMap off: jk soll nichts matchen, 'j' und 'k' normal durch
+        sendKey(frontend, uuidF, FcitxKey_i);
+
+        TEST("InsertMap off: 'j' im Insert nicht akzeptiert");
+        EXPECT_FALSE(sendKeyAccepted(frontend, uuidF, FcitxKey_j));
+
+        TEST("InsertMap off: 'k' im Insert nicht akzeptiert");
+        EXPECT_FALSE(sendKeyAccepted(frontend, uuidF, FcitxKey_k));
+
+        // Escape zurueck zu Normal, um sauber aufzuraeumen
+        sendKey(frontend, uuidF, FcitxKey_Escape);
+
+        frontend->call<ITestFrontend::destroyInputContext>(uuidF);
+
+        // Defaults wiederherstellen
+        resetConfigDefault(vimod);
+    }
+
+    // ====== Config: Features selektiv (nur Delete an) ======
+    std::cerr << "\n=== Config: Features selektiv (nur Delete an) ===\n";
+
+    {
+        RawConfig cfg;
+        cfg.setValueByPath("General/EnabledByDefault", "False");
+        cfg.setValueByPath("General/ToggleKey/0", "Control+Escape");
+        cfg.setValueByPath("AppFilter/Mode", "None");
+        cfg.setValueByPath("Features/CountPrefix", "False");
+        cfg.setValueByPath("Features/DeleteChar", "True");
+        cfg.setValueByPath("Features/Delete", "True");
+        cfg.setValueByPath("Features/YankPaste", "False");
+        cfg.setValueByPath("Features/Change", "False");
+        cfg.setValueByPath("Features/UndoRedo", "False");
+        cfg.setValueByPath("Features/InsertMap", "True");
+        cfg.setValueByPath("Mappings/TimeoutMs", "200");
+        cfg.setValueByPath("Mappings/InsertMap/0", "jk=Escape");
+        vimod->setConfig(cfg);
+
+        auto uuidS = frontend->call<ITestFrontend::createInputContext>("");
+        auto *icS = instance->inputContextManager().findByUUID(uuidS);
+        if (icS) {
+            icS->focusIn();
+        }
+        sendKey(frontend, uuidS, FcitxKey_Escape, KeyState::Ctrl);
+
+        TEST("Selektiv: x -> Delete (aktiv)");
+        sendKey(frontend, uuidS, FcitxKey_x);
+        EXPECT_FORWARDED(FcitxKey_Delete);
+
+        TEST("Selektiv: dw -> Shift+Ctrl+Right, Delete (aktiv)");
+        forwarded.clear();
+        frontend->call<ITestFrontend::keyEvent>(uuidS, Key(FcitxKey_d), false);
+        frontend->call<ITestFrontend::keyEvent>(uuidS, Key(FcitxKey_w), false);
+        EXPECT_FORWARDED_COUNT(2);
+
+        TEST("Selektiv: y -> kein Forward (YankPaste off)");
+        sendKey(frontend, uuidS, FcitxKey_y);
+        EXPECT_NO_FORWARD();
+
+        TEST("Selektiv: c -> kein Forward (Change off)");
+        sendKey(frontend, uuidS, FcitxKey_c);
+        EXPECT_NO_FORWARD();
+
+        // InsertMap on: jk -> Escape sollte funktionieren
+        sendKey(frontend, uuidS, FcitxKey_i);
+        EXPECT_TRUE(sendKeyAccepted(frontend, uuidS, FcitxKey_j));
+
+        TEST("Selektiv: InsertMap on -> jk triggert zurueck zu Normal");
+        forwarded.clear();
+        frontend->call<ITestFrontend::keyEvent>(uuidS, Key(FcitxKey_k), false);
+        EXPECT_NO_FORWARD();
+
+        TEST("Selektiv: nach jk -> h -> Left (wieder Normal)");
+        sendKey(frontend, uuidS, FcitxKey_h);
+        EXPECT_FORWARDED(FcitxKey_Left);
+
+        frontend->call<ITestFrontend::destroyInputContext>(uuidS);
+
+        resetConfigDefault(vimod);
     }
 
     // ====== Zusammenfassung ======
