@@ -291,7 +291,10 @@ log
 # Tests (best-effort)
 #-----------------------------------------------------------------------
 info "Running tests..."
-if (cd "${BUILD_DIR}" && /usr/bin/ctest --output-on-failure); then
+if ! (cd "${BUILD_DIR}" && /usr/bin/ctest -N 2>/dev/null \
+        | /usr/bin/grep -q '^  Test '); then
+    warn "No tests built (fcitx5 test frontends not available)."
+elif (cd "${BUILD_DIR}" && /usr/bin/ctest --output-on-failure); then
     ok "✓ Tests passed"
 else
     warn "Tests reported failures — continuing anyway."

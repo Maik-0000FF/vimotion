@@ -1,7 +1,12 @@
-find_package(Fcitx5ModuleTestFrontend REQUIRED)
-find_package(Fcitx5ModuleTestIM REQUIRED)
+find_package(Fcitx5ModuleTestFrontend QUIET)
+find_package(Fcitx5ModuleTestIM QUIET)
 
-# Addon-Descriptor fuer Testumgebung bereitstellen
+if(NOT Fcitx5ModuleTestFrontend_FOUND OR NOT Fcitx5ModuleTestIM_FOUND)
+    message(STATUS
+        "vimotion: fcitx5 test frontends not found — skipping tests.")
+    return()
+endif()
+
 configure_file(
     "${CMAKE_SOURCE_DIR}/src/vimotion.conf.in"
     "${CMAKE_CURRENT_BINARY_DIR}/addon/vimotion.conf"
