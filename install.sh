@@ -246,25 +246,17 @@ LEGACY_DATA_CANDIDATES=(
     /usr/local/share/fcitx5/addon/vimotion-module.conf
     /usr/local/share/fcitx5/inputmethod/vimotion-im.conf
 )
-# vimotion.conf is also a current install target — only stale if it
-# already exists from a previous install of THIS version, in which case
-# `cmake --install` will overwrite it cleanly. We still include it so
-# users can opt to wipe it on reinstall.
-CURRENT_DATA_CANDIDATES=(
-    /usr/share/fcitx5/addon/vimotion.conf
-    /usr/local/share/fcitx5/addon/vimotion.conf
-)
 
+# vimotion.conf is excluded: cmake --install overwrites it in place.
 STALE_FILES=()
-for f in "${INSTALL_LIB_CANDIDATES[@]}" \
-         "${LEGACY_LIB_CANDIDATES[@]}" \
+for f in "${LEGACY_LIB_CANDIDATES[@]}" \
          "${LEGACY_DATA_CANDIDATES[@]}" \
-         "${CURRENT_DATA_CANDIDATES[@]}"; do
+         "${INSTALL_LIB_CANDIDATES[@]}"; do
     [[ -f "${f}" ]] && STALE_FILES+=("${f}")
 done
 
 if (( ${#STALE_FILES[@]} > 0 )); then
-    warn "Found previous installation files:"
+    warn "Found existing vimotion files from a previous installation:"
     for f in "${STALE_FILES[@]}"; do
         log "  - ${f}"
     done
@@ -272,7 +264,7 @@ if (( ${#STALE_FILES[@]} > 0 )); then
     read -r -p "Remove before reinstalling? [Y/n] " reply || reply=""
     if [[ ! "${reply}" =~ ^[Nn]$ ]]; then
         sudo /usr/bin/rm -f -- "${STALE_FILES[@]}"
-        ok "✓ Old installation removed"
+        ok "✓ Old files removed"
     else
         warn "Old files may conflict with the new installation"
     fi
@@ -367,11 +359,11 @@ log
 #-----------------------------------------------------------------------
 if [[ "${DISTRO}" == "debian" ]]; then
     info "Configuring input method framework..."
-    if ! command -v im-config >/dev/null 2>&1; then
+    if [[ ! -x /usr/bin/im-config ]]; then
         warn "Installing im-config..."
         sudo /usr/bin/apt-get install -y im-config
     fi
-    im-config -n fcitx5 >/dev/null 2>&1 || true
+    /usr/bin/im-config -n fcitx5 >/dev/null 2>&1 || true
     ok "✓ Fcitx5 set as default input method"
     log
 fi
@@ -417,8 +409,8 @@ log
 info "Reloading Fcitx5..."
 if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
-        if command -v fcitx5-remote >/dev/null 2>&1; then
-            fcitx5-remote -r >/dev/null 2>&1 && \
+        if [[ -x /usr/bin/fcitx5-remote ]]; then
+            /usr/bin/fcitx5-remote -r >/dev/null 2>&1 && \
                 ok "✓ Fcitx5 config reloaded" || \
                 warn "fcitx5-remote -r failed"
         fi
@@ -426,7 +418,7 @@ if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     else
         /usr/bin/pkill -x fcitx5 >/dev/null 2>&1 || true
         /usr/bin/sleep 1
-        ( /usr/bin/setsid fcitx5 -d >/dev/null 2>&1 & ) || true
+        ( /usr/bin/setsid /usr/bin/fcitx5 -d >/dev/null 2>&1 & ) || true
         /usr/bin/sleep 2
         if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
             ok "✓ Fcitx5 restarted"

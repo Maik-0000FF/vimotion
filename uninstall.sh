@@ -208,7 +208,6 @@ for autostart in "${AUTOSTART_FILES[@]}"; do
             warn "Keeping autostart."
         fi
         log
-        break
     fi
 done
 
@@ -221,8 +220,8 @@ DESKTOP="${XDG_CURRENT_DESKTOP:-}"
 info "Reloading Fcitx5..."
 if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     if [[ "${SESSION}" == "wayland" && "${DESKTOP}" == "KDE" ]]; then
-        if command -v fcitx5-remote >/dev/null 2>&1; then
-            fcitx5-remote -r >/dev/null 2>&1 && \
+        if [[ -x /usr/bin/fcitx5-remote ]]; then
+            /usr/bin/fcitx5-remote -r >/dev/null 2>&1 && \
                 ok "✓ Fcitx5 config reloaded" || \
                 warn "fcitx5-remote -r failed"
         fi
@@ -230,7 +229,7 @@ if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
     else
         /usr/bin/pkill -x fcitx5 >/dev/null 2>&1 || true
         /usr/bin/sleep 1
-        ( /usr/bin/setsid fcitx5 -d >/dev/null 2>&1 & ) || true
+        ( /usr/bin/setsid /usr/bin/fcitx5 -d >/dev/null 2>&1 & ) || true
         /usr/bin/sleep 2
         if /usr/bin/pgrep -x fcitx5 >/dev/null 2>&1; then
             ok "✓ Fcitx5 restarted"

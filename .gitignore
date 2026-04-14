@@ -5,6 +5,10 @@ cmake-build-*/
 *.so
 *.a
 
+# Installer logs
+install.log
+uninstall.log
+
 # IDE
 .idea/
 .vscode/
